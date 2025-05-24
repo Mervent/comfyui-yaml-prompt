@@ -1,8 +1,31 @@
+"""Prompt‑template YAML flattener with section‑local variables and built‑ins.
+
+Features
+--------
+*   **Global and section‑level `vars:`** — string values can reference
+    previously defined variables with ``$name``.
+*   **Built‑in functions** — currently ``rand(min, max)`` for a one‑shot random
+    float; easy to extend with more helpers.
+*   **`choice` / `oneOf` blocks** — support weights and per‑option chance.
+*   **Brace lists** — inline random picks such as ``{a|0.5::b|c}``.
+*   **`template` / `block_template`** — with variable expansion.
+*   **Comma‑merging** — consecutive plain strings are merged into a single line
+    for compact prompts.
+
+Usage
+-----
+```
+python prompt_parser.py prompt.yaml
+```
+Prints each top‑level section (``meta:``, ``plot:``, …) as a separate paragraph
+ready for Stable‑Diffusion style prompts.
+"""
+
 from __future__ import annotations
 
 from argparse import ArgumentParser
 from pathlib import Path
-from random import choices, random
+from random import choices, random, uniform
 from re import Match
 from re import compile as re_compile
 from typing import Any, Final, Iterable, Sequence
@@ -20,6 +43,26 @@ aYAML = Any  # Alias for readability: arbitrary loaded‑YAML structure
 
 VARIABLE_PATTERN = re_compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
 BRACE_PATTERN = re_compile(r"\{([^{}]+)\}")  # e.g. {a|0.5::b|c}
+
+
+# Built-in call pattern (currently only rand)
+FUNCTION_PATTERN = re_compile(
+    r"^rand\(\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)\s*\)$"
+)
+
+# ---------------------------------------------------------------------------
+# Simple expression helpers
+# ---------------------------------------------------------------------------
+
+
+def evaluate_expression(text: str) -> str:
+    """Evaluate supported built-ins such as ``rand(min, max)``."""
+    m = FUNCTION_PATTERN.match(text)
+    if m:
+        lo, hi = map(float, m.groups())
+        return str(round(uniform(lo, hi), 2))
+    return text
+
 
 # ---------------------------------------------------------------------------
 # Low‑level expansion helpers
@@ -162,14 +205,20 @@ def parse_section(section_data: aYAML, variables: dict[str, str]) -> list[str]:
     if section_data is None:
         return []
 
-    # Section‑level templates
-    item_template: str
-    block_template: str | None
+    # Section-local variables (shadow globals)
+    if isinstance(section_data, dict) and "vars" in section_data:
+        variables = collect_variables(section_data["vars"], variables)
+    # Section-level templates – expand variables immediately
     if isinstance(section_data, dict):
-        item_template = section_data.get("template", "$value")
-        block_template = section_data.get("block_template")
+        raw_item_tpl = section_data.get("template", "$value")
+        raw_blk_tpl = section_data.get("block_template")
     else:
-        item_template, block_template = "$value", None
+        raw_item_tpl, raw_blk_tpl = "$value", None
+
+    item_template = expand_string(raw_item_tpl, variables)
+    block_template = (
+        expand_string(raw_blk_tpl, variables) if raw_blk_tpl is not None else None
+    )
 
     # Extract list of items
     if isinstance(section_data, dict):
@@ -182,7 +231,8 @@ def parse_section(section_data: aYAML, variables: dict[str, str]) -> list[str]:
     elif isinstance(section_data, list):
         list_items = section_data
     else:
-        list_items = [section_data]
+        # Dict with only template/vars/etc. → no list content
+        list_items = [section_data] if not isinstance(section_data, dict) else []
 
     # Merge consecutive plain strings (plus the first trailing choice)
     merged_lines: list[str] = []
@@ -246,12 +296,17 @@ def parse_section(section_data: aYAML, variables: dict[str, str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def collect_variables(raw_variables: dict[str, aYAML]) -> dict[str, str]:
-    """Resolve the *vars:* section, evaluating any nested choices."""
-    resolved: dict[str, str] = {}
+def collect_variables(
+    raw_variables: dict[str, aYAML],
+    base: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Resolve a ``vars:`` mapping, extending *base* if given."""
+    resolved: dict[str, str] = dict(base or {})
     for name, value in raw_variables.items():
-        expanded_value = evaluate_item(value, resolved)  # allows self‑reference order
-        resolved[name] = expanded_value or ""
+        expanded = evaluate_item(value, resolved)  # supports nested choices
+        if isinstance(expanded, str):  # apply built-ins
+            expanded = evaluate_expression(expanded)
+        resolved[name] = expanded or ""
     return resolved
 
 
