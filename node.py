@@ -57,5 +57,5 @@ class YAMLPromptLoader:
             return (f"Parser error: {error}",)
 
         prompt_lines = [line for block in blocks for line in block]
-        prompt_text = "\n".join(prompt_lines)
+        prompt_text = "\n\n".join(prompt_lines)
         return (prompt_text,)

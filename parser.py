@@ -1,27 +1,30 @@
-"""Prompt‑template YAML flattener with section‑local variables and built‑ins.
+from __future__ import annotations
+
+"""Prompt‑template YAML flattener
+=================================
 
 Features
 --------
-*   **Global and section‑level `vars:`** — string values can reference
-    previously defined variables with ``$name``.
-*   **Built‑in functions** — currently ``rand(min, max)`` for a one‑shot random
-    float; easy to extend with more helpers.
-*   **`choice` / `oneOf` blocks** — support weights and per‑option chance.
-*   **Brace lists** — inline random picks such as ``{a|0.5::b|c}``.
-*   **`template` / `block_template`** — with variable expansion.
-*   **Comma‑merging** — consecutive plain strings are merged into a single line
-    for compact prompts.
+* **Global & section‑local `vars:`** – reference with ``$name``.
+* **Wildcards** – any ``__name__`` token is replaced by a random line from
+  ``wildcards/name.txt`` (blank lines ignored). Wildcards work inside
+  variables, templates, braces, anywhere.
+* **Built‑ins** – currently ``rand(min, max)`` for one‑shot random floats.
+* **`choice` / `oneOf` blocks** – with per‑option weight & chance.
+* **Brace lists** – inline picks like ``{foo|0.5::bar|baz}``.
+* **Templates** – `template:` wraps each item; `block_template:` wraps the
+  whole section. Both honour variables & wildcards.
+* **Comma merging** – consecutive plain strings are merged to keep prompts
+  compact.
 
-Usage
------
+CLI Usage
+---------
 ```
 python prompt_parser.py prompt.yaml
 ```
-Prints each top‑level section (``meta:``, ``plot:``, …) as a separate paragraph
-ready for Stable‑Diffusion style prompts.
+Prints each top‑level section (``meta:``, ``plot:``, …) as a paragraph ready for
+Stable‑Diffusion style prompts.
 """
-
-from __future__ import annotations
 
 from argparse import ArgumentParser
 from pathlib import Path
@@ -39,24 +42,58 @@ import yaml
 LIST_KEYS: Final[Sequence[str]] = ("values", "options", "choices")
 CHOICE_KEYS: Final[Sequence[str]] = ("choice", "oneOf")
 
-aYAML = Any  # Alias for readability: arbitrary loaded‑YAML structure
+_WILDCARD_DIR = Path(__file__).with_name("wildcards")
+_WILDCARD_CACHE: dict[str, list[str]] = {}
+
+aYAML = Any  # Loaded‑YAML value (dict, list, str, …)
 
 VARIABLE_PATTERN = re_compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
-BRACE_PATTERN = re_compile(r"\{([^{}]+)\}")  # e.g. {a|0.5::b|c}
-
-
-# Built-in call pattern (currently only rand)
+BRACE_PATTERN = re_compile(r"\{([^{}]+)\}")  # {a|0.5::b|c}
+WILDCARD_PATTERN = re_compile(r"__([A-Za-z0-9_]+)__")
 FUNCTION_PATTERN = re_compile(
     r"^rand\(\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)\s*\)$"
 )
 
 # ---------------------------------------------------------------------------
-# Simple expression helpers
+# Wildcard helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_wildcard(name: str) -> list[str]:
+    """Return non‑blank lines from *wildcards/name.txt* (cached)."""
+    if name in _WILDCARD_CACHE:
+        return _WILDCARD_CACHE[name]
+
+    path = _WILDCARD_DIR / f"{name}.txt"
+    try:
+        lines = [
+            ln.strip()
+            for ln in path.read_text(encoding="utf‑8").splitlines()
+            if ln.strip()
+        ]
+    except FileNotFoundError:
+        lines = []
+    _WILDCARD_CACHE[name] = lines
+    return lines
+
+
+def substitute_wildcards(text: str) -> str:
+    """Replace every ``__name__`` with a random line from its wildcard file."""
+
+    def _replace(match: Match[str]) -> str:  # noqa: D401
+        options = _load_wildcard(match.group(1))
+        return choices(options)[0] if options else match.group(0)
+
+    return WILDCARD_PATTERN.sub(_replace, text)
+
+
+# ---------------------------------------------------------------------------
+# Expression & variable helpers
 # ---------------------------------------------------------------------------
 
 
 def evaluate_expression(text: str) -> str:
-    """Evaluate supported built-ins such as ``rand(min, max)``."""
+    """Evaluate supported built‑ins such as ``rand(0, 1)``."""
     m = FUNCTION_PATTERN.match(text)
     if m:
         lo, hi = map(float, m.groups())
@@ -64,13 +101,8 @@ def evaluate_expression(text: str) -> str:
     return text
 
 
-# ---------------------------------------------------------------------------
-# Low‑level expansion helpers
-# ---------------------------------------------------------------------------
-
-
 def substitute_variables(text: str, variables: dict[str, str]) -> str:
-    """Replace "$name" occurrences with their corresponding values."""
+    """Replace each ``$name`` with the corresponding value."""
 
     def _replace(match: Match[str]) -> str:  # noqa: D401
         return variables.get(match.group(1), match.group(0))
@@ -78,110 +110,97 @@ def substitute_variables(text: str, variables: dict[str, str]) -> str:
     return VARIABLE_PATTERN.sub(_replace, text)
 
 
-def choose_from_brace(match: Match[str], variables: dict[str, str]) -> str:
-    """Resolve a single brace expression like "{a|0.3::b|c}"."""
-    parts = [part.strip() for part in match.group(1).split("|") if part.strip()]
-    options: list[str] = []
-    weights: list[float] = []
+# ---------------------------------------------------------------------------
+# Recursive string expansion (variables → braces → wildcards)
+# ---------------------------------------------------------------------------
 
+
+def choose_from_brace(match: Match[str], variables: dict[str, str]) -> str:
+    parts = [p.strip() for p in match.group(1).split("|") if p.strip()]
+    opts, wgts = [], []
     for part in parts:
         if "::" in part:
-            weight_text, option_text = part.split("::", 1)
+            w_txt, opt_txt = part.split("::", 1)
             try:
-                weight = float(weight_text)
-            except ValueError:  # malformed weight – treat entire string
-                weight, option_text = 1.0, part
+                weight = float(w_txt)
+            except ValueError:
+                weight, opt_txt = 1.0, part
         else:
-            weight, option_text = 1.0, part
-
-        expanded_option = expand_string(option_text, variables)
-        options.append(expanded_option)
-        weights.append(weight)
-
-    return choices(options, weights)[0]
+            weight, opt_txt = 1.0, part
+        opts.append(expand_string(opt_txt, variables))
+        wgts.append(weight)
+    return choices(opts, wgts)[0]
 
 
 def expand_string(text: str, variables: dict[str, str]) -> str:
-    """Recursively expand variables and brace choices within *text*."""
-    # First pass: variables
+    """Expand `$vars`, brace lists, and wildcards until the text stabilises."""
     expanded = substitute_variables(text, variables)
 
-    # Repeatedly replace braces until the text stabilises
     while True:
-        new_expanded = BRACE_PATTERN.sub(
+        new_text = BRACE_PATTERN.sub(
             lambda m: choose_from_brace(m, variables), expanded
         )
-        if new_expanded == expanded:
-            return new_expanded.strip()
-        expanded = new_expanded
+        new_text = substitute_wildcards(new_text)
+        if new_text == expanded:
+            return new_text.strip()
+        expanded = new_text
 
 
 # ---------------------------------------------------------------------------
-# Choice / oneOf blocks
+# choice/oneOf handling
 # ---------------------------------------------------------------------------
 
 
 def resolve_choice_block(
     block: dict[str, Any], variables: dict[str, str]
 ) -> str | None:
-    """Evaluate a *choice* or *oneOf* mapping, returning the selected string."""
     if random() > float(block.get("chance", 1)):
-        return None  # Block skipped due to chance
+        return None
 
     template = block.get("template", "$value")
-    options_list: list[Any] | None = next(
-        (block[key] for key in LIST_KEYS if key in block), None
-    )
-    if options_list is None:
-        message = (
-            "choice/oneOf block must contain 'values', 'options', or 'choices' list."
+    options = next((block[k] for k in LIST_KEYS if k in block), None)
+    if options is None:
+        raise ValueError(
+            "choice/oneOf block requires 'values', 'options', or 'choices'."
         )
-        raise ValueError(message)
 
-    option_texts: list[str] = []
-    option_weights: list[float] = []
-
-    for option in options_list:
-        # Option can be a plain string or a mapping with extra fields
-        if isinstance(option, dict):
-            if random() > float(option.get("chance", 1)):
-                continue  # Option skipped by chance
-            name = option.get("name", "")
-            weight = float(option.get("weight", 1))
+    texts, weights = [], []
+    for opt in options:
+        if isinstance(opt, dict):
+            if random() > float(opt.get("chance", 1)):
+                continue
+            name, weight = opt.get("name", ""), float(opt.get("weight", 1))
         else:
-            name, weight = option, 1.0
+            name, weight = opt, 1.0
+        texts.append(expand_string(str(name), variables))
+        weights.append(weight)
 
-        expanded_name = expand_string(str(name), variables)
-        option_texts.append(expanded_name)
-        option_weights.append(weight)
+    if not texts:
+        return None
 
-    if not option_texts:
-        return None  # All options were skipped
-
-    chosen_text = choices(option_texts, option_weights)[0]
-    return expand_string(template.replace("$value", chosen_text), variables)
+    chosen = choices(texts, weights)[0]
+    return expand_string(template.replace("$value", chosen), variables)
 
 
 # ---------------------------------------------------------------------------
-# List‑item evaluation
+# Item evaluation (single YAML node → str)
 # ---------------------------------------------------------------------------
 
 
 def evaluate_item(item: aYAML, variables: dict[str, str]) -> str | None:
-    """Return a fully expanded string for *item*, or *None* if skipped."""
-    # Wrapper mapping: {choice: {...}} or {oneOf: {...}}
+    # Wrapper shorthand: {choice: ...}
     if isinstance(item, dict) and len(item) == 1 and next(iter(item)) in CHOICE_KEYS:
-        wrapper_key = next(iter(item))
-        block = item[wrapper_key]
-        if not isinstance(block, dict):  # shorthand list form
+        key = next(iter(item))
+        block = item[key]
+        if not isinstance(block, dict):
             block = {"values": block}
         return resolve_choice_block(block, variables)
 
-    # Direct mapping that already contains choice/oneOf fields
-    if isinstance(item, dict) and any(key in item for key in CHOICE_KEYS):
+    # Direct mapping containing choice/oneOf keys
+    if isinstance(item, dict) and any(k in item for k in CHOICE_KEYS):
         return resolve_choice_block(item, variables)
 
-    # Named value with optional chance/weight (weight ignored here)
+    # Named entry with chance (weight ignored here)
     if isinstance(item, dict) and "name" in item:
         if random() > float(item.get("chance", 1)):
             return None
@@ -191,8 +210,25 @@ def evaluate_item(item: aYAML, variables: dict[str, str]) -> str | None:
     if isinstance(item, str):
         return expand_string(item, variables)
 
-    # Fallback: any other YAML type → stringify
+    # Fallback: stringify other YAML types
     return expand_string(str(item), variables)
+
+
+# ---------------------------------------------------------------------------
+# Variable collection
+# ---------------------------------------------------------------------------
+
+
+def collect_variables(
+    raw: dict[str, aYAML], base: dict[str, str] | None = None
+) -> dict[str, str]:
+    vars_: dict[str, str] = dict(base or {})
+    for name, value in raw.items():
+        expanded = evaluate_item(value, vars_)
+        if isinstance(expanded, str):
+            expanded = evaluate_expression(expanded)
+        vars_[name] = expanded or ""
+    return vars_
 
 
 # ---------------------------------------------------------------------------
@@ -200,156 +236,129 @@ def evaluate_item(item: aYAML, variables: dict[str, str]) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def parse_section(section_data: aYAML, variables: dict[str, str]) -> list[str]:
-    """Convert one top‑level section into a list of output lines."""
-    if section_data is None:
+def parse_section(section: aYAML, variables: dict[str, str]) -> list[str]:
+    if section is None:
         return []
 
-    # Section-local variables (shadow globals)
-    if isinstance(section_data, dict) and "vars" in section_data:
-        variables = collect_variables(section_data["vars"], variables)
-    # Section-level templates – expand variables immediately
-    if isinstance(section_data, dict):
-        raw_item_tpl = section_data.get("template", "$value")
-        raw_blk_tpl = section_data.get("block_template")
+    # Section‑local vars
+    if isinstance(section, dict) and "vars" in section:
+        variables = collect_variables(section["vars"], variables)
+
+    # Templates
+    if isinstance(section, dict):
+        raw_item_tpl = section.get("template", "$value")
+        raw_block_tpl = section.get("block_template")
     else:
-        raw_item_tpl, raw_blk_tpl = "$value", None
+        raw_item_tpl, raw_block_tpl = "$value", None
 
-    item_template = expand_string(raw_item_tpl, variables)
-    block_template = (
-        expand_string(raw_blk_tpl, variables) if raw_blk_tpl is not None else None
-    )
+    item_tpl = expand_string(raw_item_tpl, variables)
+    block_tpl = expand_string(raw_block_tpl, variables) if raw_block_tpl else None
 
-    # Extract list of items
-    if isinstance(section_data, dict):
+    # List items
+    if isinstance(section, dict):
         list_items: Iterable[aYAML] | None = next(
-            (section_data[key] for key in LIST_KEYS if key in section_data),
-            None,
+            (section[k] for k in LIST_KEYS if k in section), None
         )
         if list_items is None:
-            list_items = [section_data]  # The dict itself is the single item
-    elif isinstance(section_data, list):
-        list_items = section_data
+            list_items = []  # dict only holds templates/vars
+    elif isinstance(section, list):
+        list_items = section
     else:
-        # Dict with only template/vars/etc. → no list content
-        list_items = [section_data] if not isinstance(section_data, dict) else []
+        list_items = [section]
 
-    # Merge consecutive plain strings (plus the first trailing choice)
-    merged_lines: list[str] = []
-    plain_buffer: list[str] = []
+    merged, buffer = [], []
 
-    def flush_buffer() -> None:
-        if plain_buffer:
-            merged = ", ".join(plain_buffer)
-            merged_lines.append(
-                expand_string(item_template.replace("$value", merged), variables)
+    def flush() -> None:
+        if buffer:
+            merged_txt = ", ".join(buffer)
+            merged.append(
+                expand_string(item_tpl.replace("$value", merged_txt), variables)
             )
-            plain_buffer.clear()
+            buffer.clear()
 
-    for list_item in list_items:
-        if isinstance(list_item, str):
-            plain_buffer.append(expand_string(list_item, variables))
+    for itm in list_items:
+        if isinstance(itm, str):
+            buffer.append(expand_string(itm, variables))
             continue
 
-        # Merge the *first* choice/oneOf following a run of plain strings
-        is_choice_dict = isinstance(list_item, dict) and (
-            (len(list_item) == 1 and next(iter(list_item)) in CHOICE_KEYS)
-            or any(key in list_item for key in CHOICE_KEYS)
+        is_choice = isinstance(itm, dict) and (
+            (len(itm) == 1 and next(iter(itm)) in CHOICE_KEYS)
+            or any(k in itm for k in CHOICE_KEYS)
         )
-        if plain_buffer and is_choice_dict:
-            chosen_text = evaluate_item(list_item, variables)
-            if chosen_text is not None:
-                plain_buffer.append(chosen_text)
-            flush_buffer()
+        if buffer and is_choice:
+            ch = evaluate_item(itm, variables)
+            if ch is not None:
+                buffer.append(ch)
+            flush()
             continue
 
-        flush_buffer()
-        expanded_item = evaluate_item(list_item, variables)
-        if expanded_item is not None:
-            merged_lines.append(
-                expand_string(item_template.replace("$value", expanded_item), variables)
-            )
+        flush()
+        ev = evaluate_item(itm, variables)
+        if ev is not None:
+            merged.append(expand_string(item_tpl.replace("$value", ev), variables))
 
-    flush_buffer()
+    flush()
 
-    # Simple comma‑section: every original entry was a plain string, no templates
-    simple_comma_section = (
+    simple_plain = (
         all(isinstance(entry, str) for entry in list_items)
-        and item_template == "$value"
-        and block_template is None
+        and item_tpl == "$value"
+        and block_tpl is None
     )
-    if simple_comma_section:
-        return [", ".join(merged_lines)]
+    if simple_plain:
+        return [", ".join(merged)]
 
-    if block_template is not None:
-        # The whole section is wrapped once, joined with commas
-        wrapped = expand_string(
-            block_template.replace("$value", ", ".join(merged_lines)), variables
-        )
-        return [wrapped]
+    if block_tpl is not None:
+        return [
+            expand_string(block_tpl.replace("$value", ", ".join(merged)), variables)
+        ]
 
-    return merged_lines
+    return merged
 
 
 # ---------------------------------------------------------------------------
-# Variable collection & document parsing
+# ---------------------------------------------------------------------------
+# Document parsing
 # ---------------------------------------------------------------------------
 
 
-def collect_variables(
-    raw_variables: dict[str, aYAML],
-    base: dict[str, str] | None = None,
-) -> dict[str, str]:
-    """Resolve a ``vars:`` mapping, extending *base* if given."""
-    resolved: dict[str, str] = dict(base or {})
-    for name, value in raw_variables.items():
-        expanded = evaluate_item(value, resolved)  # supports nested choices
-        if isinstance(expanded, str):  # apply built-ins
-            expanded = evaluate_expression(expanded)
-        resolved[name] = expanded or ""
-    return resolved
-
-
-def parse_document(document: dict[str, aYAML]) -> list[list[str]]:
-    """Convert the YAML document into blocks of output lines."""
-    variables = collect_variables(document.get("vars", {}))
-
+def parse_document(doc: dict[str, aYAML]) -> list[list[str]]:
+    variables = collect_variables(doc.get("vars", {}))
     blocks: list[list[str]] = []
-    for section_name, section_value in document.items():
-        if section_name == "vars":
+    for sec_name, sec_val in doc.items():
+        if sec_name == "vars":
             continue
-        section_lines = parse_section(section_value, variables)
-        if section_lines:
-            blocks.append(section_lines)
+        lines = parse_section(sec_val, variables)
+        if lines:
+            blocks.append(lines)
     return blocks
 
 
 # ---------------------------------------------------------------------------
-# CLI entry point
+# CLI
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:  # noqa: D401: keep name concise for __main__ guard
+def main() -> None:  # noqa: D401 – concise name for __main__
     parser = ArgumentParser(description="Flatten YAML prompt files into prompt lines.")
     parser.add_argument("file", type=Path, help="Path to the YAML prompt definition")
     args = parser.parse_args()
 
     try:
-        yaml_text = args.file.read_text(encoding="utf-8")
-    except OSError as error:
-        parser.error(f"Unable to read '{args.file}': {error}")
+        yaml_text = args.file.read_text(encoding="utf‑8")
+    except OSError as err:
+        parser.error(f"Unable to read '{args.file}': {err}")
 
     try:
         yaml_data: dict[str, aYAML] = yaml.safe_load(yaml_text) or {}
-    except yaml.YAMLError as error:
-        parser.error(f"YAML parsing error: {error}")
+    except yaml.YAMLError as err:
+        parser.error(f"YAML parsing error: {err}")
 
-    prompt_blocks = parse_document(yaml_data)
+    blocks = parse_document(yaml_data)
 
-    for index, block in enumerate(prompt_blocks):
-        print(*block, sep="\n")
-        if index != len(prompt_blocks) - 1:
-            print()  # blank line between top-level sections
+    for i, block in enumerate(blocks):
+        print(*block, sep="")
+        if i != len(blocks) - 1:
+            print()  # blank line between sections
 
 
 if __name__ == "__main__":
