@@ -88,7 +88,7 @@ def _eval_builtin(text: str) -> str:
     m = FUNCTION_PATTERN.match(text)
     if m:
         lo, hi = map(float, m.groups())
-        return str(uniform(lo, hi))
+        return str(round(uniform(lo, hi), 2))
     return text
 
 
