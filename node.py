@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """ComfyUI node: Load a YAML prompt definition and flatten it.
 
 Extras added in this revision
@@ -11,8 +9,11 @@ Extras added in this revision
   different nodes can use different wildcard folders in the same workflow.
 """
 
+from __future__ import annotations
+
+import time
 from pathlib import Path
-from typing import Final, List
+from typing import Any, Final, List
 
 import yaml
 
@@ -100,3 +101,7 @@ class YAMLPromptLoader:
         prompt_lines = [line for block in blocks for line in block]
         prompt_text = "\n\n".join(prompt_lines)
         return (prompt_text,)
+
+    @classmethod
+    def IS_CHANGED(cls, *_: Any, **__: Any) -> float:
+        return time.time()
