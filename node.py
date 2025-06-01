@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from random import random
 from typing import Any, Final, List
 
 import yaml
 
-from .parser import parse_document
+from .parser import YAMLPromptTemplateParser
 
 
 class YAMLPromptLoader:
@@ -53,6 +54,13 @@ class YAMLPromptLoader:
                         "placeholder": "Folder with *.txt wildcards (blank → ./wildcards)",
                     },
                 ),
+                "seed": (
+                    "INT",
+                    {
+                        "default": -1,
+                        "placeholder": "Seed for deterministic randomness",
+                    },
+                ),
             },
         }
 
@@ -60,7 +68,12 @@ class YAMLPromptLoader:
     # Main execution
     # ------------------------------------------------------------------
 
-    def run(self, file_path: str, wildcards_path: str):  # noqa: D401 – API fixed by ComfyUI
+    def run(
+        self,
+        file_path: str,
+        wildcards_path: str,
+        seed: int,
+    ):  # noqa: D401 – API fixed by ComfyUI
         """Load *file_path*, parse YAML, and return the flattened prompt."""
         path = Path(file_path).expanduser().resolve()
 
@@ -90,8 +103,12 @@ class YAMLPromptLoader:
         except yaml.YAMLError as error:
             return (f"YAML error: {error}",)
 
+        if seed == -1:
+            seed = random.randint(0, 9999999999999)
+
         try:
-            blocks = parse_document(yaml_data, wildcard_dir=wildcard_dir)
+            parser = YAMLPromptTemplateParser(seed=seed, wildcard_dir=wildcard_dir)
+            blocks = parser.parse_document(yaml_data)
         except Exception as error:  # noqa: BLE001 – surface any parser error
             return (f"Parser error: {error}",)
 
