@@ -11,9 +11,9 @@ Extras added in this revision
 
 from __future__ import annotations
 
+import random
 import time
 from pathlib import Path
-from random import random
 from typing import Any, Final, List
 
 import yaml
