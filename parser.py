@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import random
 import re
 from pathlib import Path
@@ -45,6 +46,8 @@ class YAMLPromptTemplateParser:
         else:
             # Fall back to Python’s global RNG (not recommended for multi-run reproducibility)
             self.random = random
+
+        self.seed = seed  # keep the original seed
 
         if wildcard_dir:
             self.wildcard_dir = Path(wildcard_dir).expanduser().resolve()
@@ -115,8 +118,12 @@ class YAMLPromptTemplateParser:
 
     def _subst_wildcards(self, text: str) -> str:
         def repl(m: re.Match[str]) -> str:
-            options = self._load_wildcard(m.group(1))
-            return self.random.choice(options) if options else m.group(0)
+            name = m.group(1)
+            options = self._load_wildcard(name)
+            if not options:
+                return m.group(0)
+            idx = self._stable_index_for_wildcard(name, len(options))
+            return options[idx]
 
         return self.WILDCARD_PATTERN.sub(repl, text)
 
@@ -314,6 +321,13 @@ class YAMLPromptTemplateParser:
             ]
 
         return merged
+
+    def _stable_index_for_wildcard(self, name: str, n: int) -> int:
+        if self.seed is None:
+            return self.random.randrange(n)
+        key = f"{self.seed}:{str(self.wildcard_dir)}:{name}".encode("utf-8")
+        digest = hashlib.sha256(key).digest()
+        return int.from_bytes(digest[:8], "big") % n
 
     # -----------------------------------------------------------------------
     # Public API
