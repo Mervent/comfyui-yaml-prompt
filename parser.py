@@ -233,6 +233,19 @@ class YAMLPromptTemplateParser:
         if section is None:
             return []
 
+        if isinstance(section, dict) and "chance" in section:
+            try:
+                chance = float(section.get("chance", 1))
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Invalid chance on section: {section.get('chance')!r}"
+                )
+            chance = max(0.0, min(1.0, chance))
+            if self.random.random() > chance:
+                return []
+            # strip 'chance' so it doesn't leak into template/vars processing
+            section = {k: v for k, v in section.items() if k != "chance"}
+
         # Handle section-local vars
         if isinstance(section, dict) and "vars" in section:
             variables = self._collect_vars(section["vars"], variables)
