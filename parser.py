@@ -1,9 +1,12 @@
 import argparse
 import hashlib
+import logging
 import random
 import re
 from pathlib import Path
 from typing import Any, Final, Iterable, Sequence
+
+logger = logging.getLogger(__name__)
 
 import yaml
 
@@ -18,7 +21,7 @@ class YAMLPromptTemplateParser:
     CHOICE_KEYS: Final[Sequence[str]] = ("choice", "oneOf")
 
     DEFAULT_WILDCARD_DIR: Final[Path] = Path(__file__).with_name("wildcards")
-    _WILDCARD_CACHE: dict[tuple[Path, str], list[str]] = {}
+    MAX_EXPANSION_DEPTH: Final[int] = 64
 
     VARIABLE_PATTERN = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
     BRACE_PATTERN = re.compile(r"\{([^{}]+)\}")  # {a|0.5::b|c}
@@ -41,13 +44,12 @@ class YAMLPromptTemplateParser:
             the module’s `wildcards/` folder.
         """
         if seed is not None:
-            # Create a private RNG instance
-            self.random = random.Random(seed)
+            self.rng = random.Random(seed)
         else:
-            # Fall back to Python’s global RNG (not recommended for multi-run reproducibility)
-            self.random = random
+            self.rng = random.Random()
 
-        self.seed = seed  # keep the original seed
+        self.seed = seed
+        self._wildcard_cache: dict[tuple[Path, str], list[str]] = {}
 
         if wildcard_dir:
             self.wildcard_dir = Path(wildcard_dir).expanduser().resolve()
@@ -60,8 +62,8 @@ class YAMLPromptTemplateParser:
     def _load_wildcard(self, name: str) -> list[str]:
         """Return non-blank lines from `directory/name.txt`, cached."""
         key = (self.wildcard_dir, name)
-        if key in self._WILDCARD_CACHE:
-            return self._WILDCARD_CACHE[key]
+        if key in self._wildcard_cache:
+            return self._wildcard_cache[key]
 
         file_path = self.wildcard_dir / f"{name}.txt"
         try:
@@ -73,7 +75,7 @@ class YAMLPromptTemplateParser:
         except FileNotFoundError:
             lines = []
 
-        self._WILDCARD_CACHE[key] = lines
+        self._wildcard_cache[key] = lines
         return lines
 
     # -----------------------------------------------------------------------
@@ -84,7 +86,7 @@ class YAMLPromptTemplateParser:
         m = self.FUNCTION_PATTERN.match(text)
         if m:
             lo, hi = map(float, m.groups())
-            return str(round(self.random.uniform(lo, hi), 2))
+            return str(round(self.rng.uniform(lo, hi), 2))
         return text
 
     # -----------------------------------------------------------------------
@@ -114,14 +116,20 @@ class YAMLPromptTemplateParser:
             opts.append(self.expand_string(opt_txt, variables))
             wgts.append(weight)
 
-        return self.random.choices(opts, wgts)[0]
+        if not opts:
+            return ""
+        return self.rng.choices(opts, wgts)[0]
 
     def _subst_wildcards(self, text: str) -> str:
         def repl(m: re.Match[str]) -> str:
             name = m.group(1)
             options = self._load_wildcard(name)
             if not options:
-                return m.group(0)
+                logger.warning(
+                    "Wildcard '%s' not found or empty: %s/%s.txt",
+                    name, self.wildcard_dir, name,
+                )
+                return ""
             idx = self._stable_index_for_wildcard(name, len(options))
             return options[idx]
 
@@ -132,8 +140,8 @@ class YAMLPromptTemplateParser:
         # First, substitute all variable references
         expanded = self._subst_vars(text, variables)
 
-        # Then, iteratively resolve braces and wildcards until nothing changes
-        while True:
+        # Iteratively resolve braces and wildcards until stable
+        for _ in range(self.MAX_EXPANSION_DEPTH):
             new_text = self.BRACE_PATTERN.sub(
                 lambda m: self._choose_brace(m, variables), expanded
             )
@@ -143,13 +151,19 @@ class YAMLPromptTemplateParser:
                 return new_text.strip()
             expanded = new_text
 
+        raise ValueError(
+            f"Expansion depth exceeded ({self.MAX_EXPANSION_DEPTH} iterations). "
+            f"Possible self-referencing pattern in: {text[:80]!r}"
+        )
+
     # -----------------------------------------------------------------------
     # choice/oneOf handling
     # -----------------------------------------------------------------------
     def _resolve_choice(
         self, block: dict[str, Any], variables: dict[str, str]
     ) -> str | None:
-        if self.random.random() > float(block.get("chance", 1)):
+        chance = float(block.get("chance", 1))
+        if chance < 1.0 and self.rng.random() > chance:
             return None
 
         template = block.get("template", "$value")
@@ -162,7 +176,8 @@ class YAMLPromptTemplateParser:
 
         for opt in options:
             if isinstance(opt, dict):
-                if self.random.random() > float(opt.get("chance", 1)):
+                opt_chance = float(opt.get("chance", 1))
+                if opt_chance < 1.0 and self.rng.random() > opt_chance:
                     continue
                 name, weight = opt.get("name", ""), float(opt.get("weight", 1))
             else:
@@ -174,13 +189,23 @@ class YAMLPromptTemplateParser:
         if not texts:
             return None
 
-        chosen = self.random.choices(texts, weights)[0]
+        chosen = self.rng.choices(texts, weights)[0]
         return self.expand_string(template.replace("$value", chosen), variables)
 
     # -----------------------------------------------------------------------
     # Item evaluation
     # -----------------------------------------------------------------------
     def _eval_item(self, item: aYAML, variables: dict[str, str]) -> str | None:
+        """Evaluate a single item into a prompt string.
+
+        Match priority (first match wins):
+        1. Single-key choice wrapper: {"choice": ...} or {"oneOf": ...}
+        2. Dict with choice key anywhere: {"choice": ..., "template": ...}
+           Note: overlaps with 1, but 1 normalizes shorthand before delegating.
+        3. Named entry: {"name": "...", "chance": 0.5, "weight": 2}
+        4. Plain string
+        5. Fallback: stringify
+        """
         # 1) Wrapper shorthand for single-key choice/oneOf blocks
         if (
             isinstance(item, dict)
@@ -199,7 +224,8 @@ class YAMLPromptTemplateParser:
 
         # 3) Named entry with chance
         if isinstance(item, dict) and "name" in item:
-            if self.random.random() > float(item.get("chance", 1)):
+            item_chance = float(item.get("chance", 1))
+            if item_chance < 1.0 and self.rng.random() > item_chance:
                 return None
             return self.expand_string(str(item["name"]), variables)
 
@@ -241,7 +267,7 @@ class YAMLPromptTemplateParser:
                     f"Invalid chance on section: {section.get('chance')!r}"
                 )
             chance = max(0.0, min(1.0, chance))
-            if self.random.random() > chance:
+            if chance < 1.0 and self.rng.random() > chance:
                 return []
             # strip 'chance' so it doesn't leak into template/vars processing
             section = {k: v for k, v in section.items() if k != "chance"}
@@ -337,7 +363,7 @@ class YAMLPromptTemplateParser:
 
     def _stable_index_for_wildcard(self, name: str, n: int) -> int:
         if self.seed is None:
-            return self.random.randrange(n)
+            return self.rng.randrange(n)
         key = f"{self.seed}:{str(self.wildcard_dir)}:{name}".encode("utf-8")
         digest = hashlib.sha256(key).digest()
         return int.from_bytes(digest[:8], "big") % n
@@ -356,8 +382,13 @@ class YAMLPromptTemplateParser:
         Returns
         -------
         list[list[str]]
-            Each inner list is one section’s flattened prompt lines.
+            Each inner list is one section's flattened prompt lines.
         """
+        if not isinstance(doc, dict):
+            raise TypeError(
+                f"Expected a YAML mapping (dict) at top level, got {type(doc).__name__}. "
+                f"Check that your YAML file starts with key: value pairs, not a list."
+            )
 
         # First, collect global variables
         variables = self._collect_vars(doc.get("vars", {}), {})
@@ -373,36 +404,89 @@ class YAMLPromptTemplateParser:
         return blocks
 
 
+def _parse_var_value(value: str) -> Any:
+    import json
+
+    if value.lower() == "true":
+        return True
+    if value.lower() == "false":
+        return False
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, (list, dict)):
+            return parsed
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return value
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    from jinja_env import render_template
+
+    ap = argparse.ArgumentParser(
         description="Flatten YAML prompt files into prompt lines (seeded RNG)."
     )
-    parser.add_argument(
+    ap.add_argument(
         "file", type=Path, help="YAML prompt definition file (e.g. prompt.yaml)"
     )
-    parser.add_argument(
+    ap.add_argument(
         "--wildcards-dir",
         type=Path,
         default=None,
         help="Directory containing wildcard `*.txt` files",
     )
-    parser.add_argument(
+    ap.add_argument(
         "--seed",
         type=int,
         default=None,
         help="Seed for deterministic randomness (optional)",
     )
-    args = parser.parse_args()
+    ap.add_argument(
+        "--var",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Jinja2 context variable (repeatable, e.g. --var enemy=true)",
+    )
+    args = ap.parse_args()
+
+    jinja_vars: dict[str, Any] = {}
+    for var_str in args.var:
+        if "=" not in var_str:
+            ap.error(f"--var must be KEY=VALUE, got: {var_str!r}")
+        key, val = var_str.split("=", 1)
+        jinja_vars[key.strip()] = _parse_var_value(val.strip())
 
     try:
         raw_yaml = args.file.read_text(encoding="utf-8")
     except OSError as err:
-        parser.error(f"Cannot read '{args.file}': {err}")
+        ap.error(f"Cannot read '{args.file}': {err}")
 
+    # Phase 1: Jinja2 preprocessing
     try:
-        data: dict[str, aYAML] = yaml.safe_load(raw_yaml) or {}
+        rendered = render_template(
+            raw_yaml,
+            jinja_vars=jinja_vars or None,
+            search_paths=[args.file.parent.resolve()],
+            seed=args.seed,
+            wildcard_dir=args.wildcards_dir,
+        )
+    except Exception as err:
+        ap.error(f"Jinja2 error: {err}")
+
+    # Phase 2: YAML parsing
+    try:
+        data: dict[str, aYAML] = yaml.safe_load(rendered) or {}
     except yaml.YAMLError as err:
-        parser.error(f"YAML error: {err}")
+        ap.error(f"YAML error: {err}")
 
     flattener = YAMLPromptTemplateParser(
         seed=args.seed,

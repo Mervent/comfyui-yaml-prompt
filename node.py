@@ -1,16 +1,8 @@
-"""ComfyUI node: Load a YAML prompt definition and flatten it.
-
-Extras added in this revision
------------------------------
-* **Wildcards folder input** – new *wildcards_path* field lets you specify a
-  directory containing ``*.txt`` wildcard files. If left empty it defaults to a
-  sibling ``wildcards`` directory next to the YAML file.
-* The loader sets ``parser._WILDCARD_DIR`` at runtime and clears the cache so
-  different nodes can use different wildcard folders in the same workflow.
-"""
+"""ComfyUI node: Load a YAML prompt definition and flatten it."""
 
 from __future__ import annotations
 
+import json
 import random
 import time
 from pathlib import Path
@@ -18,6 +10,7 @@ from typing import Any, Final, List
 
 import yaml
 
+from .jinja_env import render_template
 from .parser import YAMLPromptTemplateParser
 
 
@@ -61,6 +54,14 @@ class YAMLPromptLoader:
                         "placeholder": "Seed for deterministic randomness",
                     },
                 ),
+                "jinja_vars": (
+                    "STRING",
+                    {
+                        "multiline": True,
+                        "default": "{}",
+                        "placeholder": '{"enemy": true, "theme": "dark"}',
+                    },
+                ),
             },
         }
 
@@ -73,38 +74,48 @@ class YAMLPromptLoader:
         file_path: str,
         wildcards_path: str,
         seed: int,
+        jinja_vars: str,
     ):  # noqa: D401 – API fixed by ComfyUI
-        """Load *file_path*, parse YAML, and return the flattened prompt."""
+        """Load *file_path*, preprocess with Jinja2, parse YAML, return prompt."""
         path = Path(file_path).expanduser().resolve()
 
-        # -------------------------------------------------------------
-        # Determine and inject wildcard directory
-        # -------------------------------------------------------------
         if wildcards_path.strip():
             wildcard_dir = Path(wildcards_path).expanduser().resolve()
         else:
             wildcard_dir = path.parent / "wildcards"
 
-        # -------------------------------------------------------------
-        # Read YAML file
-        # -------------------------------------------------------------
         try:
-            yaml_text = path.read_text(encoding="utf-8")
+            raw_text = path.read_text(encoding="utf-8")
         except FileNotFoundError:
             return (f"File not found: {path}",)
         except OSError as error:
             return (f"Cannot read file: {error}",)
 
-        # -------------------------------------------------------------
-        # Parse YAML
-        # -------------------------------------------------------------
         try:
-            yaml_data = yaml.safe_load(yaml_text) or {}
-        except yaml.YAMLError as error:
-            return (f"YAML error: {error}",)
+            vars_dict = json.loads(jinja_vars) if jinja_vars.strip() else {}
+        except json.JSONDecodeError as error:
+            return (f"Invalid JSON in jinja_vars: {error}",)
 
         if seed == -1:
             seed = random.randint(0, 9999999999999)
+
+        # Phase 1: Jinja2 preprocessing
+        try:
+            rendered = render_template(
+                raw_text,
+                jinja_vars=vars_dict or None,
+                search_paths=[path.parent],
+                seed=seed,
+                wildcard_dir=wildcard_dir,
+            )
+        except Exception as error:  # noqa: BLE001 – surface any Jinja2 error
+            return (f"Jinja2 error: {error}",)
+
+        # Phase 2: YAML parsing
+        try:
+            yaml_data = yaml.safe_load(rendered) or {}
+        except yaml.YAMLError as error:
+            return (f"YAML error: {error}",)
 
         try:
             parser = YAMLPromptTemplateParser(seed=seed, wildcard_dir=wildcard_dir)
@@ -112,9 +123,6 @@ class YAMLPromptLoader:
         except Exception as error:  # noqa: BLE001 – surface any parser error
             return (f"Parser error: {error}",)
 
-        # -------------------------------------------------------------
-        # Flatten to a single prompt string
-        # -------------------------------------------------------------
         prompt_lines = [line for block in blocks for line in block]
         prompt_text = "\n\n".join(prompt_lines)
         return (prompt_text,)
