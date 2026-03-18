@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 __all__ = ["extract_lora_tags", "strip_lora_tags"]
@@ -11,9 +12,12 @@ LORA_TAG_PATTERN = re.compile(r"<lora:([^>]+)>")
 
 def _safe_float(text: str, default: float = 1.0) -> float:
     try:
-        return float(text)
+        value = float(text)
     except ValueError:
         return default
+    if not math.isfinite(value):
+        return default
+    return value
 
 
 def _parse_lora_match(inner: str) -> tuple[str, float, float] | None:
@@ -26,16 +30,12 @@ def _parse_lora_match(inner: str) -> tuple[str, float, float] | None:
     if not name:
         return None
 
-    model_weight = _safe_float(parts[1]) if len(parts) >= 2 else 1.0
-
     if len(parts) >= 3:
-        clip_weight = _safe_float(parts[2])
-    elif len(parts) == 2:
-        clip_weight = model_weight
-    else:
-        clip_weight = 1.0
-
-    return (name, model_weight, clip_weight)
+        return (name, _safe_float(parts[1]), _safe_float(parts[2]))
+    if len(parts) == 2:
+        model_weight = _safe_float(parts[1])
+        return (name, model_weight, model_weight)
+    return (name, 1.0, 1.0)
 
 
 def extract_lora_tags(text: str) -> list[tuple[str, float, float]]:

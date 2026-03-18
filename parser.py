@@ -91,7 +91,7 @@ class YAMLPromptTemplateParser:
     # -----------------------------------------------------------------------
     # Expansion helpers (variables → braces → wildcards)
     # -----------------------------------------------------------------------
-    def _subst_vars(self, text: str, variables: dict[str, str]) -> str:
+    def _substitute_variables(self, text: str, variables: dict[str, str]) -> str:
         """Replace ``$name`` references with their values from *variables*."""
         def repl(match: re.Match[str]) -> str:
             return variables.get(match.group(1), match.group(0))
@@ -121,7 +121,7 @@ class YAMLPromptTemplateParser:
             return ""
         return self.rng.choices(options, weights)[0]
 
-    def _subst_wildcards(self, text: str) -> str:
+    def _substitute_wildcards(self, text: str) -> str:
         """Replace ``__name__`` wildcard tokens with lines from text files."""
         def repl(match: re.Match[str]) -> str:
             name = match.group(1)
@@ -139,14 +139,14 @@ class YAMLPromptTemplateParser:
 
     def expand_string(self, text: str, variables: dict[str, str]) -> str:
         """Expand ``$vars``, brace lists, and wildcards until stable."""
-        expanded = self._subst_vars(text, variables)
+        expanded = self._substitute_variables(text, variables)
 
         def resolve_brace(match: re.Match[str]) -> str:
             return self._choose_brace(match, variables)
 
         for _ in range(self.MAX_EXPANSION_DEPTH):
             new_text = self.BRACE_PATTERN.sub(resolve_brace, expanded)
-            new_text = self._subst_wildcards(new_text)
+            new_text = self._substitute_wildcards(new_text)
 
             if new_text == expanded:
                 return new_text.strip()
@@ -170,7 +170,7 @@ class YAMLPromptTemplateParser:
                 return True
         return any(k in item for k in self.CHOICE_KEYS)
 
-    def _collect_weighted_options(
+    def _filter_and_weigh_options(
         self, options: list, variables: dict[str, str]
     ) -> tuple[list[str], list[float]]:
         """Filter *options* by per-item chance, return ``(texts, weights)``."""
@@ -201,7 +201,7 @@ class YAMLPromptTemplateParser:
         if options is None:
             raise ValueError("choice/oneOf requires 'values', 'options', or 'choices'.")
 
-        texts, weights = self._collect_weighted_options(options, variables)
+        texts, weights = self._filter_and_weigh_options(options, variables)
         if not texts:
             return None
 
@@ -212,9 +212,10 @@ class YAMLPromptTemplateParser:
     # Item evaluation
     # -----------------------------------------------------------------------
     def _normalize_choice_block(self, item: dict) -> dict:
-        """Normalize a single-key choice wrapper into a standard choice dict."""
-        first_key = next(iter(item))
-        block = item[first_key]
+        """Normalize a choice wrapper into a standard choice dict."""
+        if len(item) != 1:
+            return item
+        block = item[next(iter(item))]
         if not isinstance(block, dict):
             return {"values": block}
         return block
@@ -222,9 +223,7 @@ class YAMLPromptTemplateParser:
     def _resolve_item(self, item: Any, variables: dict[str, str]) -> str | None:
         """Resolve a single item into a prompt string (or ``None`` if skipped)."""
         if self._is_choice_item(item):
-            if len(item) == 1:
-                return self._resolve_choice(self._normalize_choice_block(item), variables)
-            return self._resolve_choice(item, variables)
+            return self._resolve_choice(self._normalize_choice_block(item), variables)
 
         if isinstance(item, dict) and "name" in item:
             item_chance = float(item.get("chance", 1))
@@ -254,10 +253,10 @@ class YAMLPromptTemplateParser:
     # -----------------------------------------------------------------------
     # Section parsing
     # -----------------------------------------------------------------------
-    def _apply_chance(self, section: Any) -> tuple[Any, bool]:
-        """Evaluate section-level chance; return ``(cleaned_section, was_skipped)``."""
+    def _apply_chance(self, section: Any) -> Any | None:
+        """Evaluate section-level chance; return cleaned section or ``None`` if skipped."""
         if not isinstance(section, dict) or "chance" not in section:
-            return section, False
+            return section
 
         try:
             chance = float(section["chance"])
@@ -266,10 +265,9 @@ class YAMLPromptTemplateParser:
         chance = max(0.0, min(1.0, chance))
 
         if chance < 1.0 and self.rng.random() > chance:
-            return section, True
+            return None
 
-        cleaned = {k: v for k, v in section.items() if k != "chance"}
-        return cleaned, False
+        return {k: v for k, v in section.items() if k != "chance"}
 
     def _extract_section_config(
         self, section: Any, variables: dict[str, str]
@@ -307,6 +305,13 @@ class YAMLPromptTemplateParser:
         """Apply *item_tpl* to *text* by replacing ``$value``."""
         return self.expand_string(item_tpl.replace("$value", text), variables)
 
+    def _flush_pending(
+        self, pending: list[str], item_tpl: str, variables: dict[str, str],
+    ) -> str | None:
+        if not pending:
+            return None
+        return self._apply_item_template(", ".join(pending), item_tpl, variables)
+
     def _render_items(self, items: list, variables: dict[str, str], item_tpl: str) -> list[str]:
         """Render items into a list of template-applied strings."""
         rendered: list[str] = []
@@ -325,16 +330,18 @@ class YAMLPromptTemplateParser:
                 pending = []
                 continue
 
-            if pending:
-                rendered.append(self._apply_item_template(", ".join(pending), item_tpl, variables))
-                pending = []
+            flushed = self._flush_pending(pending, item_tpl, variables)
+            if flushed is not None:
+                rendered.append(flushed)
+            pending = []
 
             result = self._resolve_item(item, variables)
             if result is not None:
                 rendered.append(self._apply_item_template(result, item_tpl, variables))
 
-        if pending:
-            rendered.append(self._apply_item_template(", ".join(pending), item_tpl, variables))
+        flushed = self._flush_pending(pending, item_tpl, variables)
+        if flushed is not None:
+            rendered.append(flushed)
 
         return rendered
 
@@ -342,7 +349,6 @@ class YAMLPromptTemplateParser:
         self,
         is_simple_plain: bool,
         rendered_lines: list[str],
-        item_tpl: str,
         block_tpl: str | None,
         variables: dict[str, str],
     ) -> list[str]:
@@ -365,8 +371,8 @@ class YAMLPromptTemplateParser:
         if section is None:
             return []
 
-        section, skipped = self._apply_chance(section)
-        if skipped:
+        section = self._apply_chance(section)
+        if section is None:
             return []
 
         variables, item_tpl, block_tpl = self._extract_section_config(section, variables)
@@ -377,7 +383,7 @@ class YAMLPromptTemplateParser:
             and block_tpl is None
         )
         rendered_lines = self._render_items(items, variables, item_tpl)
-        return self._apply_templates(is_simple_plain, rendered_lines, item_tpl, block_tpl, variables)
+        return self._apply_templates(is_simple_plain, rendered_lines, block_tpl, variables)
 
     # -----------------------------------------------------------------------
     # Public API

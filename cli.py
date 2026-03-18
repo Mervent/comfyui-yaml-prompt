@@ -10,26 +10,47 @@ __all__ = ["main"]
 from pipeline import PipelineError, process_file
 
 
-def _parse_var_value(value: str) -> Any:
-    """Auto-convert a CLI ``--var`` value to bool / int / float / JSON / str."""
-    if value.lower() == "true":
+def _to_bool(value: str) -> bool | None:
+    lower = value.lower()
+    if lower == "true":
         return True
-    if value.lower() == "false":
+    if lower == "false":
         return False
+    return None
+
+
+def _to_int(value: str) -> int | None:
     try:
         return int(value)
     except ValueError:
-        pass
+        return None
+
+
+def _to_float(value: str) -> float | None:
     try:
         return float(value)
     except ValueError:
-        pass
+        return None
+
+
+def _to_json_collection(value: str) -> Any:
     try:
         parsed = json.loads(value)
         if isinstance(parsed, (list, dict)):
             return parsed
     except (json.JSONDecodeError, ValueError):
         pass
+    return None
+
+
+_CONVERTERS = (_to_bool, _to_int, _to_float, _to_json_collection)
+
+
+def _parse_var_value(value: str) -> Any:
+    for convert in _CONVERTERS:
+        result = convert(value)
+        if result is not None:
+            return result
     return value
 
 

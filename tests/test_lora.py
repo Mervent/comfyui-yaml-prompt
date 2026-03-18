@@ -97,3 +97,15 @@ def test_strip_collapses_whitespace():
     result = strip_lora_tags("a  <lora:x:1>  b")
 
     assert result == "a b"
+
+
+def test_extract_inf_weight_defaults():
+    result = extract_lora_tags("<lora:x:inf>")
+
+    assert result == [("x", 1.0, 1.0)]
+
+
+def test_extract_nan_weight_defaults():
+    result = extract_lora_tags("<lora:x:0.5:nan>")
+
+    assert result == [("x", 0.5, 1.0)]

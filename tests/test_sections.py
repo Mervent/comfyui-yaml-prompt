@@ -150,3 +150,12 @@ def test_section_named_item_filtered_by_chance(make_parser):
     result = p._parse_section(section, {})
 
     assert result == []
+
+
+def test_strings_flushed_before_named_item(make_parser):
+    p = make_parser(seed=42)
+    section = ["a", "b", {"name": "special"}]
+
+    result = p._parse_section(section, {})
+
+    assert result == ["a, b", "special"]
