@@ -15,9 +15,6 @@ INCLUDES_DIR = FIXTURES_DIR / "includes"
 sys.path.insert(0, str(ROOT))
 
 from parser import YAMLPromptTemplateParser  # noqa: E402
-import jinja_env  # noqa: E402
-import lora  # noqa: E402
-from jinja_env import render_template  # noqa: E402
 
 
 def _import_node_module():
@@ -34,13 +31,14 @@ def _import_node_module():
     pkg.__path__ = [str(ROOT)]
     pkg.__package__ = _PKG
     sys.modules[_PKG] = pkg
-    sys.modules[f"{_PKG}.parser"] = sys.modules["parser"]
-    sys.modules[f"{_PKG}.jinja_env"] = sys.modules["jinja_env"]
-    sys.modules[f"{_PKG}.lora"] = sys.modules["lora"]
+    for py_file in sorted(ROOT.glob("*.py")):
+        name = py_file.stem
+        if name == "__init__":
+            continue
+        if name in sys.modules:
+            sys.modules[f"{_PKG}.{name}"] = sys.modules[name]
 
-    spec = importlib.util.spec_from_file_location(
-        f"{_PKG}.node", ROOT / "node.py"
-    )
+    spec = importlib.util.spec_from_file_location(f"{_PKG}.node", ROOT / "node.py")
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     mod.__package__ = _PKG
@@ -55,11 +53,13 @@ _node_mod = _import_node_module()
 @pytest.fixture
 def make_parser():
     """Factory: call with optional seed and wildcard_dir."""
+
     def _factory(seed=None, wildcard_dir=None):
         return YAMLPromptTemplateParser(
             seed=seed,
             wildcard_dir=wildcard_dir or WILDCARDS_DIR,
         )
+
     return _factory
 
 

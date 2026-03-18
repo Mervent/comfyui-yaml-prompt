@@ -5,10 +5,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-import yaml
+__all__ = ["main"]
 
-from jinja_env import render_template
-from parser import YAMLPromptTemplateParser
+from pipeline import PipelineError, process_file
 
 
 def _parse_var_value(value: str) -> Any:
@@ -71,37 +70,18 @@ def main() -> None:
         jinja_vars[key.strip()] = _parse_var_value(val.strip())
 
     try:
-        raw_yaml = args.file.read_text(encoding="utf-8")
-    except OSError as err:
-        ap.error(f"Cannot read '{args.file}': {err}")
-
-    # Phase 1: Jinja2 preprocessing
-    try:
-        rendered = render_template(
-            raw_yaml,
-            jinja_vars=jinja_vars or None,
-            search_paths=[args.file.parent.resolve()],
+        result = process_file(
+            args.file,
             seed=args.seed,
             wildcard_dir=args.wildcards_dir,
+            jinja_vars=jinja_vars or None,
         )
-    except Exception as err:
-        ap.error(f"Jinja2 error: {err}")
+    except PipelineError as error:
+        ap.error(str(error))
 
-    # Phase 2: YAML parsing
-    try:
-        data: dict[str, Any] = yaml.safe_load(rendered) or {}
-    except yaml.YAMLError as err:
-        ap.error(f"YAML error: {err}")
-
-    flattener = YAMLPromptTemplateParser(
-        seed=args.seed,
-        wildcard_dir=args.wildcards_dir,
-    )
-    blocks = flattener.parse_document(data)
-
-    for i, block in enumerate(blocks):
+    for i, block in enumerate(result.blocks):
         print(*block, sep="\n")
-        if i != len(blocks) - 1:
+        if i != len(result.blocks) - 1:
             print()
 
 

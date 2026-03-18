@@ -8,11 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Final
 
-import yaml
-
-from .jinja_env import render_template
-from .lora import extract_lora_tags, strip_lora_tags
-from .parser import YAMLPromptTemplateParser
+from .pipeline import PipelineError, process_file
 
 
 class YAMLPromptLoader:
@@ -83,14 +79,7 @@ class YAMLPromptLoader:
         if wildcards_path.strip():
             wildcard_dir = Path(wildcards_path).expanduser().resolve()
         else:
-            wildcard_dir = path.parent / "wildcards"
-
-        try:
-            raw_text = path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return (f"File not found: {path}", [])
-        except OSError as error:
-            return (f"Cannot read file: {error}", [])
+            wildcard_dir = None
 
         try:
             vars_dict = json.loads(jinja_vars) if jinja_vars.strip() else {}
@@ -100,36 +89,17 @@ class YAMLPromptLoader:
         if seed == -1:
             seed = random.randint(0, 9999999999999)
 
-        # Phase 1: Jinja2 preprocessing
         try:
-            rendered = render_template(
-                raw_text,
-                jinja_vars=vars_dict or None,
-                search_paths=[path.parent],
+            result = process_file(
+                path,
                 seed=seed,
                 wildcard_dir=wildcard_dir,
+                jinja_vars=vars_dict or None,
             )
-        except Exception as error:  # noqa: BLE001 – surface any Jinja2 error
-            return (f"Jinja2 error: {error}", [])
+        except PipelineError as error:
+            return (str(error), [])
 
-        # Phase 2: YAML parsing
-        try:
-            yaml_data = yaml.safe_load(rendered) or {}
-        except yaml.YAMLError as error:
-            return (f"YAML error: {error}", [])
-
-        try:
-            parser = YAMLPromptTemplateParser(seed=seed, wildcard_dir=wildcard_dir)
-            blocks = parser.parse_document(yaml_data)
-        except Exception as error:  # noqa: BLE001 – surface any parser error
-            return (f"Parser error: {error}", [])
-
-        prompt_lines = [line for block in blocks for line in block]
-        prompt_text = "\n\n".join(prompt_lines)
-
-        lora_stack = extract_lora_tags(prompt_text)
-        clean_prompt = strip_lora_tags(prompt_text)
-        return (clean_prompt, lora_stack)
+        return (result.prompt, result.lora_stack)
 
     @classmethod
     def IS_CHANGED(cls, *_: Any, **__: Any) -> float:

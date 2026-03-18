@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Any
 
 import jinja2
+from wildcards import load_lines
+
+__all__ = ["create_environment", "render_template"]
 
 logger = logging.getLogger(__name__)
 
@@ -53,17 +56,9 @@ def _make_globals(
         if wildcard_dir is None:
             logger.warning("wildcard('%s') called but no wildcard_dir configured", name)
             return ""
-        file_path = wildcard_dir / f"{name}.txt"
-        try:
-            lines = [
-                ln.strip()
-                for ln in file_path.read_text(encoding="utf-8").splitlines()
-                if ln.strip()
-            ]
-        except FileNotFoundError:
-            logger.warning("Wildcard file not found: %s", file_path)
-            return ""
+        lines = load_lines(wildcard_dir, name)
         if not lines:
+            logger.warning("Wildcard file not found: %s", wildcard_dir / f"{name}.txt")
             return ""
         return rng.choice(lines)
 

@@ -5,9 +5,12 @@ import re
 from pathlib import Path
 from typing import Any, Final, Sequence
 
+import yaml
+from wildcards import load_lines
+
 logger = logging.getLogger(__name__)
 
-import yaml
+__all__ = ["YAMLPromptTemplateParser"]
 
 
 class YAMLPromptTemplateParser:
@@ -54,21 +57,13 @@ class YAMLPromptTemplateParser:
         if key in self._wildcard_cache:
             return self._wildcard_cache[key]
 
-        file_path = self.wildcard_dir / f"{name}.txt"
-        try:
-            lines = [
-                line.strip()
-                for line in file_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-        except FileNotFoundError:
-            lines = []
+        lines = load_lines(self.wildcard_dir, name)
 
         self._wildcard_cache[key] = lines
         return lines
 
-    def _stable_index_for_wildcard(self, name: str, n: int) -> int:
-        """Return a deterministic index for seeded runs, random otherwise."""
+    def _seed_derived_index(self, name: str, n: int) -> int:
+        """Return an index derived from the seed and *name*, bypassing RNG state."""
         if self.seed is None:
             return self.rng.randrange(n)
         key = f"{self.seed}:{str(self.wildcard_dir)}:{name}".encode("utf-8")
@@ -137,7 +132,7 @@ class YAMLPromptTemplateParser:
                     name, self.wildcard_dir, name,
                 )
                 return ""
-            idx = self._stable_index_for_wildcard(name, len(candidates))
+            idx = self._seed_derived_index(name, len(candidates))
             return candidates[idx]
 
         return self.WILDCARD_PATTERN.sub(repl, text)
@@ -146,10 +141,10 @@ class YAMLPromptTemplateParser:
         """Expand ``$vars``, brace lists, and wildcards until stable."""
         expanded = self._subst_vars(text, variables)
 
-        for _ in range(self.MAX_EXPANSION_DEPTH):
-            def resolve_brace(match: re.Match[str]) -> str:
-                return self._choose_brace(match, variables)
+        def resolve_brace(match: re.Match[str]) -> str:
+            return self._choose_brace(match, variables)
 
+        for _ in range(self.MAX_EXPANSION_DEPTH):
             new_text = self.BRACE_PATTERN.sub(resolve_brace, expanded)
             new_text = self._subst_wildcards(new_text)
 
@@ -237,7 +232,7 @@ class YAMLPromptTemplateParser:
                 return None
             return self.expand_string(str(item["name"]), variables)
 
-        return self.expand_string(str(item) if not isinstance(item, str) else item, variables)
+        return self.expand_string(str(item), variables)
 
     # -----------------------------------------------------------------------
     # Variable collection
@@ -317,11 +312,6 @@ class YAMLPromptTemplateParser:
         rendered: list[str] = []
         pending: list[str] = []
 
-        def flush() -> None:
-            if pending:
-                rendered.append(self._apply_item_template(", ".join(pending), item_tpl, variables))
-                pending.clear()
-
         for item in items:
             if isinstance(item, str):
                 pending.append(self.expand_string(item, variables))
@@ -331,32 +321,33 @@ class YAMLPromptTemplateParser:
                 result = self._resolve_item(item, variables)
                 if result is not None:
                     pending.append(result)
-                flush()
+                rendered.append(self._apply_item_template(", ".join(pending), item_tpl, variables))
+                pending = []
                 continue
 
-            flush()
+            if pending:
+                rendered.append(self._apply_item_template(", ".join(pending), item_tpl, variables))
+                pending = []
+
             result = self._resolve_item(item, variables)
             if result is not None:
                 rendered.append(self._apply_item_template(result, item_tpl, variables))
 
-        flush()
+        if pending:
+            rendered.append(self._apply_item_template(", ".join(pending), item_tpl, variables))
+
         return rendered
 
     def _apply_templates(
         self,
-        items: list,
+        is_simple_plain: bool,
         rendered_lines: list[str],
         item_tpl: str,
         block_tpl: str | None,
         variables: dict[str, str],
     ) -> list[str]:
         """Apply block_template or merge plain items into final output."""
-        simple_plain = (
-            all(isinstance(e, str) for e in items)
-            and item_tpl == "$value"
-            and block_tpl is None
-        )
-        if simple_plain:
+        if is_simple_plain:
             return [", ".join(rendered_lines)]
 
         if block_tpl is not None:
@@ -380,8 +371,13 @@ class YAMLPromptTemplateParser:
 
         variables, item_tpl, block_tpl = self._extract_section_config(section, variables)
         items = self._extract_items(section)
+        is_simple_plain = (
+            all(isinstance(e, str) for e in items)
+            and item_tpl == "$value"
+            and block_tpl is None
+        )
         rendered_lines = self._render_items(items, variables, item_tpl)
-        return self._apply_templates(items, rendered_lines, item_tpl, block_tpl, variables)
+        return self._apply_templates(is_simple_plain, rendered_lines, item_tpl, block_tpl, variables)
 
     # -----------------------------------------------------------------------
     # Public API
