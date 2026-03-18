@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 
 from parser import YAMLPromptTemplateParser  # noqa: E402
 import jinja_env  # noqa: E402
+import lora  # noqa: E402
 from jinja_env import render_template  # noqa: E402
 
 
@@ -35,6 +36,7 @@ def _import_node_module():
     sys.modules[_PKG] = pkg
     sys.modules[f"{_PKG}.parser"] = sys.modules["parser"]
     sys.modules[f"{_PKG}.jinja_env"] = sys.modules["jinja_env"]
+    sys.modules[f"{_PKG}.lora"] = sys.modules["lora"]
 
     spec = importlib.util.spec_from_file_location(
         f"{_PKG}.node", ROOT / "node.py"

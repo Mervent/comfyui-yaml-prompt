@@ -11,6 +11,7 @@ from typing import Any, Final
 import yaml
 
 from .jinja_env import render_template
+from .lora import extract_lora_tags, strip_lora_tags
 from .parser import YAMLPromptTemplateParser
 
 
@@ -18,8 +19,8 @@ class YAMLPromptLoader:
     """ComfyUI node that loads and parses a YAML prompt file."""
 
     CATEGORY: Final[str] = "Prompt"
-    RETURN_TYPES: Final[list[str]] = ["STRING"]
-    RETURN_NAMES: Final[list[str]] = ["prompt"]
+    RETURN_TYPES: Final[list[str]] = ["STRING", "LORA_STACK"]
+    RETURN_NAMES: Final[list[str]] = ["prompt", "lora_stack"]
     FUNCTION: Final[str] = "run"
 
     # ---------------------------------------------------------------------
@@ -87,14 +88,14 @@ class YAMLPromptLoader:
         try:
             raw_text = path.read_text(encoding="utf-8")
         except FileNotFoundError:
-            return (f"File not found: {path}",)
+            return (f"File not found: {path}", [])
         except OSError as error:
-            return (f"Cannot read file: {error}",)
+            return (f"Cannot read file: {error}", [])
 
         try:
             vars_dict = json.loads(jinja_vars) if jinja_vars.strip() else {}
         except json.JSONDecodeError as error:
-            return (f"Invalid JSON in jinja_vars: {error}",)
+            return (f"Invalid JSON in jinja_vars: {error}", [])
 
         if seed == -1:
             seed = random.randint(0, 9999999999999)
@@ -109,23 +110,26 @@ class YAMLPromptLoader:
                 wildcard_dir=wildcard_dir,
             )
         except Exception as error:  # noqa: BLE001 – surface any Jinja2 error
-            return (f"Jinja2 error: {error}",)
+            return (f"Jinja2 error: {error}", [])
 
         # Phase 2: YAML parsing
         try:
             yaml_data = yaml.safe_load(rendered) or {}
         except yaml.YAMLError as error:
-            return (f"YAML error: {error}",)
+            return (f"YAML error: {error}", [])
 
         try:
             parser = YAMLPromptTemplateParser(seed=seed, wildcard_dir=wildcard_dir)
             blocks = parser.parse_document(yaml_data)
         except Exception as error:  # noqa: BLE001 – surface any parser error
-            return (f"Parser error: {error}",)
+            return (f"Parser error: {error}", [])
 
         prompt_lines = [line for block in blocks for line in block]
         prompt_text = "\n\n".join(prompt_lines)
-        return (prompt_text,)
+
+        lora_stack = extract_lora_tags(prompt_text)
+        clean_prompt = strip_lora_tags(prompt_text)
+        return (clean_prompt, lora_stack)
 
     @classmethod
     def IS_CHANGED(cls, *_: Any, **__: Any) -> float:
