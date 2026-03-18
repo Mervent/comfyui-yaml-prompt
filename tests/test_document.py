@@ -5,7 +5,7 @@ from pathlib import Path
 
 from parser import YAMLPromptTemplateParser
 
-PARSER_PY = str(Path(__file__).resolve().parent.parent / "parser.py")
+CLI_PY = str(Path(__file__).resolve().parent.parent / "cli.py")
 
 
 def test_empty_document(make_parser):
@@ -97,7 +97,7 @@ def test_cli_basic(tmp_path):
     yaml_file.write_text("section:\n  - hello\n  - world\n")
 
     result = subprocess.run(
-        ["python", PARSER_PY, str(yaml_file), "--seed", "42"],
+        ["python", CLI_PY, str(yaml_file), "--seed", "42"],
         capture_output=True, text=True,
     )
 
@@ -113,7 +113,7 @@ def test_cli_with_wildcards_dir(tmp_path):
     yaml_file.write_text("s:\n  - __items__\n")
 
     result = subprocess.run(
-        ["python", PARSER_PY, str(yaml_file), "--seed", "42",
+        ["python", CLI_PY, str(yaml_file), "--seed", "42",
          "--wildcards-dir", str(wc_dir)],
         capture_output=True, text=True,
     )
@@ -124,7 +124,7 @@ def test_cli_with_wildcards_dir(tmp_path):
 
 def test_cli_missing_file():
     result = subprocess.run(
-        ["python", PARSER_PY, "/nonexistent.yaml"],
+        ["python", CLI_PY, "/nonexistent.yaml"],
         capture_output=True, text=True,
     )
 
@@ -136,7 +136,7 @@ def test_cli_invalid_yaml(tmp_path):
     yaml_file.write_text("{{{")
 
     result = subprocess.run(
-        ["python", PARSER_PY, str(yaml_file)],
+        ["python", CLI_PY, str(yaml_file)],
         capture_output=True, text=True,
     )
 
@@ -148,7 +148,7 @@ def test_cli_multiple_sections_output(tmp_path):
     yaml_file.write_text("s1:\n  - alpha\ns2:\n  - beta\n")
 
     result = subprocess.run(
-        ["python", PARSER_PY, str(yaml_file), "--seed", "42"],
+        ["python", CLI_PY, str(yaml_file), "--seed", "42"],
         capture_output=True, text=True,
     )
 

@@ -6,7 +6,7 @@ import json
 import random
 import time
 from pathlib import Path
-from typing import Any, Final, List
+from typing import Any, Final
 
 import yaml
 
@@ -18,8 +18,8 @@ class YAMLPromptLoader:
     """ComfyUI node that loads and parses a YAML prompt file."""
 
     CATEGORY: Final[str] = "Prompt"
-    RETURN_TYPES: Final[List[str]] = ["STRING"]
-    RETURN_NAMES: Final[List[str]] = ["prompt"]
+    RETURN_TYPES: Final[list[str]] = ["STRING"]
+    RETURN_NAMES: Final[list[str]] = ["prompt"]
     FUNCTION: Final[str] = "run"
 
     # ---------------------------------------------------------------------
