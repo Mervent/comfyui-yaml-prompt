@@ -5,26 +5,26 @@ import pytest
 from parser import YAMLPromptTemplateParser
 
 
-def test_plain_string(parser42):
-    result = parser42.expand_string("hello world", {})
+def test_plain_string(parser):
+    result = parser.expand_string("hello world", {})
 
     assert result == "hello world"
 
 
-def test_variable_substitution(parser42):
-    result = parser42.expand_string("$color cat", {"color": "black"})
+def test_variable_substitution(parser):
+    result = parser.expand_string("$color cat", {"color": "black"})
 
     assert result == "black cat"
 
 
-def test_unknown_variable_kept(parser42):
-    result = parser42.expand_string("$unknown", {})
+def test_unknown_variable_kept(parser):
+    result = parser.expand_string("$unknown", {})
 
     assert result == "$unknown"
 
 
-def test_multiple_variables(parser42):
-    result = parser42.expand_string("$a and $b", {"a": "x", "b": "y"})
+def test_multiple_variables(parser):
+    result = parser.expand_string("$a and $b", {"a": "x", "b": "y"})
 
     assert result == "x and y"
 
@@ -51,44 +51,34 @@ def test_brace_weighted(make_parser):
     assert heavy_count > 70
 
 
-def test_brace_empty_option(make_parser):
-    p = make_parser(seed=42)
-
-    result = p.expand_string("{a||c}", {})
+def test_brace_empty_option(parser):
+    result = parser.expand_string("{a||c}", {})
 
     assert result in ("a", "c")
 
 
-def test_brace_all_empty_bug1_regression(make_parser):
+def test_brace_all_empty_bug1_regression(parser):
     """BUG-1 regression: {|} must not crash (IndexError)."""
-    p = make_parser(seed=42)
-
-    result = p.expand_string("{|}", {})
+    result = parser.expand_string("{|}", {})
 
     assert result == ""
 
 
-def test_brace_nested(make_parser):
-    p = make_parser(seed=42)
-
-    result = p.expand_string("{{a|b}|{c|d}}", {})
+def test_brace_nested(parser):
+    result = parser.expand_string("{{a|b}|{c|d}}", {})
 
     assert result in ("a", "b", "c", "d")
 
 
-def test_wildcard_resolved(make_parser):
-    p = make_parser(seed=42)
-
-    result = p.expand_string("__colors__", {})
+def test_wildcard_resolved(parser):
+    result = parser.expand_string("__colors__", {})
 
     assert result in ("red", "blue", "green")
 
 
-def test_wildcard_missing_file(make_parser):
+def test_wildcard_missing_file(parser):
     """HARDEN-1 regression: missing wildcard -> empty string, no crash."""
-    p = make_parser(seed=42)
-
-    result = p.expand_string("__nonexistent__", {})
+    result = parser.expand_string("__nonexistent__", {})
 
     assert result == ""
 
@@ -111,16 +101,14 @@ def test_expansion_depth_limit(tmp_path):
         p.expand_string("__cycle_a__", {})
 
 
-def test_strip_whitespace(parser42):
-    result = parser42.expand_string("  hello  ", {})
+def test_strip_whitespace(parser):
+    result = parser.expand_string("  hello  ", {})
 
     assert result == "hello"
 
 
-def test_brace_malformed_weight(make_parser):
-    p = make_parser(seed=42)
-
-    result = p.expand_string("{abc::text|other}", {})
+def test_brace_malformed_weight(parser):
+    result = parser.expand_string("{abc::text|other}", {})
 
     assert result in ("abc::text", "other")
 

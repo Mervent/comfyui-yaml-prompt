@@ -64,15 +64,9 @@ def make_parser():
 
 
 @pytest.fixture
-def parser42(make_parser):
+def parser(make_parser):
     """Parser seeded with 42, using test fixture wildcards."""
     return make_parser(seed=42)
-
-
-@pytest.fixture
-def parser_unseeded(make_parser):
-    """Unseeded parser using test fixture wildcards."""
-    return make_parser()
 
 
 @pytest.fixture

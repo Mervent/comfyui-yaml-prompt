@@ -118,3 +118,61 @@ def test_node_lora_in_jinja(node, tmp_path):
 
     assert result_yes[1] == [("anime", 0.8, 0.8)]
     assert "<lora:" not in result_yes[0]
+
+
+def test_node_jinja_vars_json(node, tmp_path):
+    yaml_file = tmp_path / "test.yaml"
+    yaml_file.write_text(
+        "{% if enemy %}\n"
+        "combat:\n"
+        "  - fighting\n"
+        "{% endif %}\n"
+        "meta:\n"
+        "  - detailed\n"
+    )
+
+    result = node.run(str(yaml_file), "", seed=42, jinja_vars='{"enemy": true}')
+
+    assert "fighting" in result[0]
+    assert "detailed" in result[0]
+
+
+def test_node_jinja_vars_empty(node, tmp_path):
+    yaml_file = tmp_path / "test.yaml"
+    yaml_file.write_text("meta:\n  - detailed\n")
+
+    result = node.run(str(yaml_file), "", seed=42, jinja_vars="")
+
+    assert "detailed" in result[0]
+
+
+def test_node_jinja_vars_invalid_json(node, tmp_path):
+    yaml_file = tmp_path / "test.yaml"
+    yaml_file.write_text("meta:\n  - detailed\n")
+
+    result = node.run(str(yaml_file), "", seed=42, jinja_vars="{bad json}")
+
+    assert "Invalid JSON" in result[0]
+
+
+def test_node_jinja_error(node, tmp_path):
+    yaml_file = tmp_path / "test.yaml"
+    yaml_file.write_text("{{ undefined_var }}\nmeta:\n  - detailed\n")
+
+    result = node.run(str(yaml_file), "", seed=42, jinja_vars="{}")
+
+    assert "Jinja2 error" in result[0]
+
+
+def test_node_include_from_same_dir(node, tmp_path):
+    part_file = tmp_path / "part.yaml"
+    part_file.write_text("extra:\n  - included\n")
+    yaml_file = tmp_path / "main.yaml"
+    yaml_file.write_text(
+        "meta:\n  - detailed\n{% include 'part.yaml' %}\n"
+    )
+
+    result = node.run(str(yaml_file), "", seed=42, jinja_vars="{}")
+
+    assert "detailed" in result[0]
+    assert "included" in result[0]

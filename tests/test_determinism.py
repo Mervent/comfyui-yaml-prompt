@@ -1,7 +1,5 @@
 """Tests for seed reproducibility guarantees."""
 
-from parser import YAMLPromptTemplateParser
-
 
 def test_same_seed_same_output(make_parser):
     doc = {
