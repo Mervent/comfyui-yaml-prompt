@@ -19,9 +19,44 @@ class YAMLPromptLoader:
     RETURN_NAMES: Final[list[str]] = ["prompt", "lora_stack"]
     FUNCTION: Final[str] = "run"
 
-    # ---------------------------------------------------------------------
-    # ComfyUI input schema
-    # ---------------------------------------------------------------------
+    def run(
+        self,
+        file_path: str,
+        wildcards_path: str,
+        seed: int,
+        jinja_vars: str,
+    ):  # noqa: D401 – API fixed by ComfyUI
+        """Load *file_path*, preprocess with Jinja2, parse YAML, return prompt."""
+        path = Path(file_path).expanduser().resolve()
+
+        if wildcards_path.strip():
+            wildcard_dir = Path(wildcards_path).expanduser().resolve()
+        else:
+            wildcard_dir = None
+
+        try:
+            vars_dict = json.loads(jinja_vars) if jinja_vars.strip() else {}
+        except json.JSONDecodeError as error:
+            return (f"Invalid JSON in jinja_vars: {error}", [])
+
+        if seed == -1:
+            seed = random.randint(0, 9999999999999)
+
+        try:
+            result = process_file(
+                path,
+                seed=seed,
+                wildcard_dir=wildcard_dir,
+                jinja_vars=vars_dict or None,
+            )
+        except PipelineError as error:
+            return (str(error), [])
+
+        return (result.prompt, result.lora_stack)
+
+    @classmethod
+    def IS_CHANGED(cls, *_: Any, **__: Any) -> float:
+        return time.time()
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -61,46 +96,3 @@ class YAMLPromptLoader:
                 ),
             },
         }
-
-    # ------------------------------------------------------------------
-    # Main execution
-    # ------------------------------------------------------------------
-
-    def run(
-        self,
-        file_path: str,
-        wildcards_path: str,
-        seed: int,
-        jinja_vars: str,
-    ):  # noqa: D401 – API fixed by ComfyUI
-        """Load *file_path*, preprocess with Jinja2, parse YAML, return prompt."""
-        path = Path(file_path).expanduser().resolve()
-
-        if wildcards_path.strip():
-            wildcard_dir = Path(wildcards_path).expanduser().resolve()
-        else:
-            wildcard_dir = None
-
-        try:
-            vars_dict = json.loads(jinja_vars) if jinja_vars.strip() else {}
-        except json.JSONDecodeError as error:
-            return (f"Invalid JSON in jinja_vars: {error}", [])
-
-        if seed == -1:
-            seed = random.randint(0, 9999999999999)
-
-        try:
-            result = process_file(
-                path,
-                seed=seed,
-                wildcard_dir=wildcard_dir,
-                jinja_vars=vars_dict or None,
-            )
-        except PipelineError as error:
-            return (str(error), [])
-
-        return (result.prompt, result.lora_stack)
-
-    @classmethod
-    def IS_CHANGED(cls, *_: Any, **__: Any) -> float:
-        return time.time()

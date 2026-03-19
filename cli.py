@@ -10,50 +10,6 @@ __all__ = ["main"]
 from pipeline import PipelineError, process_file
 
 
-def _to_bool(value: str) -> bool | None:
-    lower = value.lower()
-    if lower == "true":
-        return True
-    if lower == "false":
-        return False
-    return None
-
-
-def _to_int(value: str) -> int | None:
-    try:
-        return int(value)
-    except ValueError:
-        return None
-
-
-def _to_float(value: str) -> float | None:
-    try:
-        return float(value)
-    except ValueError:
-        return None
-
-
-def _to_json_collection(value: str) -> Any:
-    try:
-        parsed = json.loads(value)
-        if isinstance(parsed, (list, dict)):
-            return parsed
-    except (json.JSONDecodeError, ValueError):
-        pass
-    return None
-
-
-_CONVERTERS = (_to_bool, _to_int, _to_float, _to_json_collection)
-
-
-def _parse_var_value(value: str) -> Any:
-    for convert in _CONVERTERS:
-        result = convert(value)
-        if result is not None:
-            return result
-    return value
-
-
 def main() -> None:
     """Parse a YAML prompt file and print flattened prompt lines."""
     ap = argparse.ArgumentParser(
@@ -104,6 +60,50 @@ def main() -> None:
         print(*block, sep="\n")
         if i != len(result.blocks) - 1:
             print()
+
+
+def _parse_var_value(value: str) -> Any:
+    for convert in _CONVERTERS:
+        result = convert(value)
+        if result is not None:
+            return result
+    return value
+
+
+def _to_bool(value: str) -> bool | None:
+    lower = value.lower()
+    if lower == "true":
+        return True
+    if lower == "false":
+        return False
+    return None
+
+
+def _to_int(value: str) -> int | None:
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _to_float(value: str) -> float | None:
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _to_json_collection(value: str) -> Any:
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, (list, dict)):
+            return parsed
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return None
+
+
+_CONVERTERS = (_to_bool, _to_int, _to_float, _to_json_collection)
 
 
 if __name__ == "__main__":

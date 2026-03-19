@@ -23,6 +23,74 @@ logger = logging.getLogger(__name__)
 _JINJA_SEED_SALT: int = 0x6A696E6A  # "jinj" as 4 ASCII bytes
 
 
+def render_template(
+    raw_text: str,
+    *,
+    jinja_vars: dict[str, Any] | None = None,
+    search_paths: list[Path] | None = None,
+    seed: int | None = None,
+    wildcard_dir: Path | None = None,
+) -> str:
+    """Render a Jinja2 template string into plain text (ready for ``yaml.safe_load``).
+
+    Parameters
+    ----------
+    raw_text:
+        Raw template content (may contain Jinja2 syntax).
+    jinja_vars:
+        Context variables for ``{{ ... }}`` expressions.
+    search_paths:
+        Directories for ``{% include %}`` resolution.
+    seed:
+        Master seed for deterministic Jinja2 RNG.
+    wildcard_dir:
+        Directory for the ``wildcard()`` global.
+    """
+    env = create_environment(
+        search_paths=search_paths,
+        seed=seed,
+        wildcard_dir=wildcard_dir,
+    )
+    template = env.from_string(raw_text)
+    return template.render(**(jinja_vars or {}))
+
+
+def create_environment(
+    *,
+    search_paths: list[Path] | None = None,
+    seed: int | None = None,
+    wildcard_dir: Path | None = None,
+) -> jinja2.Environment:
+    """Create a configured Jinja2 ``Environment`` for prompt templates.
+
+    Parameters
+    ----------
+    search_paths:
+        Directories for ``{% include %}`` resolution (Q5: same directory only).
+    seed:
+        Master seed. Jinja2 RNG is derived via ``seed ^ _JINJA_SEED_SALT``.
+    wildcard_dir:
+        Directory for the ``wildcard()`` global function.
+    """
+    fs_paths = [str(p) for p in search_paths] if search_paths else []
+
+    env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(fs_paths) if fs_paths else jinja2.BaseLoader(),
+        trim_blocks=True,
+        lstrip_blocks=True,
+        keep_trailing_newline=True,
+        undefined=jinja2.StrictUndefined,
+    )
+
+    if seed is not None:
+        rng = random.Random(seed ^ _JINJA_SEED_SALT)
+    else:
+        rng = random.Random()
+
+    env.globals.update(_make_globals(rng, wildcard_dir))
+    return env
+
+
 def _make_globals(
     rng: random.Random,
     wildcard_dir: Path | None = None,
@@ -64,71 +132,3 @@ def _make_globals(
         "rand": rand,
         "wildcard": wildcard,
     }
-
-
-def create_environment(
-    *,
-    search_paths: list[Path] | None = None,
-    seed: int | None = None,
-    wildcard_dir: Path | None = None,
-) -> jinja2.Environment:
-    """Create a configured Jinja2 ``Environment`` for prompt templates.
-
-    Parameters
-    ----------
-    search_paths:
-        Directories for ``{% include %}`` resolution (Q5: same directory only).
-    seed:
-        Master seed. Jinja2 RNG is derived via ``seed ^ _JINJA_SEED_SALT``.
-    wildcard_dir:
-        Directory for the ``wildcard()`` global function.
-    """
-    fs_paths = [str(p) for p in search_paths] if search_paths else []
-
-    env = jinja2.Environment(
-        loader=jinja2.FileSystemLoader(fs_paths) if fs_paths else jinja2.BaseLoader(),
-        trim_blocks=True,
-        lstrip_blocks=True,
-        keep_trailing_newline=True,
-        undefined=jinja2.StrictUndefined,
-    )
-
-    if seed is not None:
-        rng = random.Random(seed ^ _JINJA_SEED_SALT)
-    else:
-        rng = random.Random()
-
-    env.globals.update(_make_globals(rng, wildcard_dir))
-    return env
-
-
-def render_template(
-    raw_text: str,
-    *,
-    jinja_vars: dict[str, Any] | None = None,
-    search_paths: list[Path] | None = None,
-    seed: int | None = None,
-    wildcard_dir: Path | None = None,
-) -> str:
-    """Render a Jinja2 template string into plain text (ready for ``yaml.safe_load``).
-
-    Parameters
-    ----------
-    raw_text:
-        Raw template content (may contain Jinja2 syntax).
-    jinja_vars:
-        Context variables for ``{{ ... }}`` expressions.
-    search_paths:
-        Directories for ``{% include %}`` resolution.
-    seed:
-        Master seed for deterministic Jinja2 RNG.
-    wildcard_dir:
-        Directory for the ``wildcard()`` global.
-    """
-    env = create_environment(
-        search_paths=search_paths,
-        seed=seed,
-        wildcard_dir=wildcard_dir,
-    )
-    template = env.from_string(raw_text)
-    return template.render(**(jinja_vars or {}))
