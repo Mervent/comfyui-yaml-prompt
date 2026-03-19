@@ -23,10 +23,6 @@ logger = logging.getLogger(__name__)
 _JINJA_SEED_SALT: int = 0x6A696E6A  # "jinj" as 4 ASCII bytes
 
 
-# ---------------------------------------------------------------------------
-# Custom Jinja2 globals
-# ---------------------------------------------------------------------------
-
 def _make_globals(
     rng: random.Random,
     wildcard_dir: Path | None = None,
@@ -70,10 +66,6 @@ def _make_globals(
     }
 
 
-# ---------------------------------------------------------------------------
-# Environment factory
-# ---------------------------------------------------------------------------
-
 def create_environment(
     *,
     search_paths: list[Path] | None = None,
@@ -109,10 +101,6 @@ def create_environment(
     env.globals.update(_make_globals(rng, wildcard_dir))
     return env
 
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 def render_template(
     raw_text: str,

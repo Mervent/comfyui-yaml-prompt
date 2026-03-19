@@ -63,11 +63,15 @@ def test_wildcard_dir_nonexistent(tmp_path):
 
 
 def test_empty_wildcard_file(parser):
-    result_empty = parser.expand_string("__empty__", {})
-    result_blanks = parser.expand_string("__blanks__", {})
+    result = parser.expand_string("__empty__", {})
 
-    assert result_empty == ""
-    assert result_blanks == ""
+    assert result == ""
+
+
+def test_blank_lines_wildcard_file(parser):
+    result = parser.expand_string("__blanks__", {})
+
+    assert result == ""
 
 
 def test_collect_vars_with_none_value(parser):

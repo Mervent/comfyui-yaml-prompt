@@ -14,9 +14,6 @@ __all__ = ["YAMLPromptTemplateParser"]
 
 
 class YAMLPromptTemplateParser:
-    # -----------------------------------------------------------------------
-    # Constants
-    # -----------------------------------------------------------------------
     VALUES_KEYS: Final[Sequence[str]] = ("values", "options", "choices")
     CHOICE_KEYS: Final[Sequence[str]] = ("choice", "oneOf")
 
@@ -30,9 +27,6 @@ class YAMLPromptTemplateParser:
         r"^rand\(\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)\s*\)$"
     )
 
-    # -----------------------------------------------------------------------
-    # Initialization
-    # -----------------------------------------------------------------------
     def __init__(self, seed: int | None = None, wildcard_dir: Path | str | None = None):
         """Create a parser with optional seed and wildcard directory."""
         if seed is not None:
@@ -48,9 +42,6 @@ class YAMLPromptTemplateParser:
         else:
             self.wildcard_dir = self.DEFAULT_WILDCARD_DIR
 
-    # -----------------------------------------------------------------------
-    # Wildcards
-    # -----------------------------------------------------------------------
     def _load_wildcard(self, name: str) -> list[str]:
         """Return non-blank lines from ``<wildcard_dir>/<name>.txt``, cached."""
         key = (self.wildcard_dir, name)
@@ -70,9 +61,6 @@ class YAMLPromptTemplateParser:
         digest = hashlib.sha256(key).digest()
         return int.from_bytes(digest[:8], "big") % n
 
-    # -----------------------------------------------------------------------
-    # Expression helpers
-    # -----------------------------------------------------------------------
     def _resolve_builtin_call(self, text: str) -> str:
         """Evaluate built-in function calls; currently only ``rand(lo, hi)``."""
         match = self.FUNCTION_PATTERN.match(text)
@@ -88,9 +76,6 @@ class YAMLPromptTemplateParser:
                 return block[key]
         return None
 
-    # -----------------------------------------------------------------------
-    # Expansion helpers (variables → braces → wildcards)
-    # -----------------------------------------------------------------------
     def _substitute_variables(self, text: str, variables: dict[str, str]) -> str:
         """Replace ``$name`` references with their values from *variables*."""
         def repl(match: re.Match[str]) -> str:
@@ -157,9 +142,6 @@ class YAMLPromptTemplateParser:
             f"Possible self-referencing pattern in: {text[:80]!r}"
         )
 
-    # -----------------------------------------------------------------------
-    # choice/oneOf handling
-    # -----------------------------------------------------------------------
     def _is_choice_item(self, item: Any) -> bool:
         """Check if *item* is a choice/oneOf block (any variant)."""
         if not isinstance(item, dict):
@@ -208,9 +190,6 @@ class YAMLPromptTemplateParser:
         chosen = self.rng.choices(texts, weights)[0]
         return self.expand_string(template.replace("$value", chosen), variables)
 
-    # -----------------------------------------------------------------------
-    # Item evaluation
-    # -----------------------------------------------------------------------
     def _normalize_choice_block(self, item: dict) -> dict:
         """Normalize a choice wrapper into a standard choice dict."""
         if len(item) != 1:
@@ -233,9 +212,6 @@ class YAMLPromptTemplateParser:
 
         return self.expand_string(str(item), variables)
 
-    # -----------------------------------------------------------------------
-    # Variable collection
-    # -----------------------------------------------------------------------
     def _collect_vars(
         self,
         raw: dict[str, Any],
@@ -250,9 +226,6 @@ class YAMLPromptTemplateParser:
             variables[name] = val if val is not None else ""
         return variables
 
-    # -----------------------------------------------------------------------
-    # Section parsing
-    # -----------------------------------------------------------------------
     def _apply_chance(self, section: Any) -> Any | None:
         """Evaluate section-level chance; return cleaned section or ``None`` if skipped."""
         if not isinstance(section, dict) or "chance" not in section:
@@ -385,9 +358,6 @@ class YAMLPromptTemplateParser:
         rendered_lines = self._render_items(items, variables, item_tpl)
         return self._apply_templates(is_simple_plain, rendered_lines, block_tpl, variables)
 
-    # -----------------------------------------------------------------------
-    # Public API
-    # -----------------------------------------------------------------------
     def parse_document(self, doc: dict[str, Any]) -> list[list[str]]:
         """Flatten *doc* into blocks of prompt lines.
 

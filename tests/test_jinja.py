@@ -9,11 +9,6 @@ from jinja_env import render_template
 from parser import YAMLPromptTemplateParser
 
 
-# ---------------------------------------------------------------------------
-# Passthrough: existing syntax must survive Jinja2 unchanged
-# ---------------------------------------------------------------------------
-
-
 def test_passthrough_no_jinja():
     raw = "meta:\n  - ultra-detailed\n  - masterpiece\n"
 
@@ -54,11 +49,6 @@ def test_wildcard_passthrough():
     assert result == raw
 
 
-# ---------------------------------------------------------------------------
-# Variable expressions: {{ ... }}
-# ---------------------------------------------------------------------------
-
-
 def test_variable_expression():
     raw = "style: {{ name }}"
 
@@ -72,11 +62,6 @@ def test_strict_undefined():
 
     with pytest.raises(jinja2.UndefinedError):
         render_template(raw)
-
-
-# ---------------------------------------------------------------------------
-# Conditionals: {% if %} / {% else %} / {% endif %}
-# ---------------------------------------------------------------------------
 
 
 def test_if_true():
@@ -105,11 +90,6 @@ def test_if_else():
     assert result_false == "b"
 
 
-# ---------------------------------------------------------------------------
-# Loops: {% for %} / {% endfor %}
-# ---------------------------------------------------------------------------
-
-
 def test_for_loop():
     raw = "{% for item in items %}- {{ item }}\n{% endfor %}"
 
@@ -118,11 +98,6 @@ def test_for_loop():
     assert "- a" in result
     assert "- b" in result
     assert "- c" in result
-
-
-# ---------------------------------------------------------------------------
-# Includes: {% include %}
-# ---------------------------------------------------------------------------
 
 
 def test_include_basic():
@@ -167,11 +142,6 @@ def test_include_no_search_paths():
         render_template(raw)
 
 
-# ---------------------------------------------------------------------------
-# Whitespace handling (trim_blocks + lstrip_blocks)
-# ---------------------------------------------------------------------------
-
-
 def test_whitespace_clean():
     raw = "meta:\n{% if x %}\n  - detailed\n{% endif %}\n  - masterpiece\n"
 
@@ -181,11 +151,6 @@ def test_whitespace_clean():
     assert "  - masterpiece" in result
     parsed = yaml.safe_load(result)
     assert "meta" in parsed
-
-
-# ---------------------------------------------------------------------------
-# Custom globals: choice, weighted_choice, rand, wildcard
-# ---------------------------------------------------------------------------
 
 
 def test_choice_returns_one_of_items():
@@ -279,11 +244,6 @@ def test_wildcard_no_dir():
     assert result == ""
 
 
-# ---------------------------------------------------------------------------
-# Seed independence: Jinja2 RNG does NOT affect parser RNG
-# ---------------------------------------------------------------------------
-
-
 def test_derived_seed_independence():
     template = "meta:\n  values:\n    - {a|b|c}\n"
     with_jinja = "{{ choice('x', 'y') }}\n" + template
@@ -300,11 +260,6 @@ def test_derived_seed_independence():
     result_without = p2.parse_document(data_without)
 
     assert result_with == result_without
-
-
-# ---------------------------------------------------------------------------
-# Full pipeline: Jinja2 -> yaml.safe_load -> parser
-# ---------------------------------------------------------------------------
 
 
 def test_full_pipeline():

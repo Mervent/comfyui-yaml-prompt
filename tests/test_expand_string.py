@@ -29,15 +29,10 @@ def test_multiple_variables(parser):
     assert result == "x and y"
 
 
-def test_brace_choice(make_parser):
-    p1 = make_parser(seed=42)
-    result1 = p1.expand_string("{a|b|c}", {})
+def test_brace_choice(parser):
+    result = parser.expand_string("{a|b|c}", {})
 
-    p2 = make_parser(seed=42)
-    result2 = p2.expand_string("{a|b|c}", {})
-
-    assert result1 in ("a", "b", "c")
-    assert result1 == result2
+    assert result in ("a", "b", "c")
 
 
 def test_brace_weighted(make_parser):

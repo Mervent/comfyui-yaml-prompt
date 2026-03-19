@@ -2,6 +2,17 @@
 
 import time
 
+import pytest
+
+
+@pytest.fixture
+def write_yaml(tmp_path):
+    def _write(content, name="test.yaml"):
+        path = tmp_path / name
+        path.write_text(content)
+        return str(path)
+    return _write
+
 
 def test_node_input_types(node_class):
     input_types = node_class.INPUT_TYPES()
@@ -18,11 +29,10 @@ def test_node_return_types(node_class):
     assert node_class.RETURN_NAMES == ["prompt", "lora_stack"]
 
 
-def test_node_run_valid_file(node, tmp_path):
-    yaml_file = tmp_path / "test.yaml"
-    yaml_file.write_text("section:\n  - hello\n  - world\n")
+def test_node_run_valid_file(node, write_yaml):
+    path = write_yaml("section:\n  - hello\n  - world\n")
 
-    result = node.run(str(yaml_file), "", seed=42, jinja_vars="{}")
+    result = node.run(path, "", seed=42, jinja_vars="{}")
 
     assert isinstance(result, tuple)
     assert len(result) == 2
@@ -37,23 +47,19 @@ def test_node_run_missing_file(node):
     assert result[1] == []
 
 
-def test_node_run_invalid_yaml(node, tmp_path):
-    yaml_file = tmp_path / "bad.yaml"
-    yaml_file.write_text("key: [unclosed\n")
+def test_node_run_invalid_yaml(node, write_yaml):
+    path = write_yaml("key: [unclosed\n", name="bad.yaml")
 
-    result = node.run(str(yaml_file), "", seed=42, jinja_vars="{}")
+    result = node.run(path, "", seed=42, jinja_vars="{}")
 
     assert "YAML error" in result[0]
     assert result[1] == []
 
 
-def test_node_seed_minus_1(node, tmp_path):
-    yaml_file = tmp_path / "test.yaml"
-    yaml_file.write_text(
-        "s:\n  - choice:\n      values: [a, b, c, d, e, f, g, h, i, j]\n"
-    )
+def test_node_seed_minus_1(node, write_yaml):
+    path = write_yaml("s:\n  - choice:\n      values: [a, b, c, d, e, f, g, h, i, j]\n")
 
-    results = {node.run(str(yaml_file), "", seed=-1, jinja_vars="{}")[0] for _ in range(20)}
+    results = {node.run(path, "", seed=-1, jinja_vars="{}")[0] for _ in range(20)}
 
     assert len(results) > 1
 
@@ -80,49 +86,47 @@ def test_node_is_changed(node_class):
     assert v1 != v2
 
 
-def test_node_lora_extraction(node, tmp_path):
-    yaml_file = tmp_path / "test.yaml"
-    yaml_file.write_text("s:\n  - beautiful scenery <lora:detail_v2:0.8>\n")
+def test_node_lora_extraction(node, write_yaml):
+    path = write_yaml("s:\n  - beautiful scenery <lora:detail_v2:0.8>\n")
 
-    result = node.run(str(yaml_file), "", seed=42, jinja_vars="{}")
+    result = node.run(path, "", seed=42, jinja_vars="{}")
 
     assert "detail_v2" not in result[0]
     assert "beautiful scenery" in result[0]
     assert result[1] == [("detail_v2", 0.8, 0.8)]
 
 
-def test_node_lora_multiple(node, tmp_path):
-    yaml_file = tmp_path / "test.yaml"
-    yaml_file.write_text(
+def test_node_lora_multiple(node, write_yaml):
+    path = write_yaml(
         "s1:\n  - photo <lora:real:0.7>\n"
         "s2:\n  - style <lora:anime:0.5:0.3>\n"
     )
 
-    result = node.run(str(yaml_file), "", seed=42, jinja_vars="{}")
+    result = node.run(path, "", seed=42, jinja_vars="{}")
 
     assert "<lora:" not in result[0]
     assert result[1] == [("real", 0.7, 0.7), ("anime", 0.5, 0.3)]
 
 
-def test_node_lora_in_jinja(node, tmp_path):
-    yaml_file = tmp_path / "test.yaml"
-    yaml_file.write_text(
-        "s:\n  - base {% if mode == 'anime' %}<lora:anime:0.8>{% endif %}\n"
-    )
+def test_node_lora_excluded_by_jinja_condition(node, write_yaml):
+    path = write_yaml("s:\n  - base {% if mode == 'anime' %}<lora:anime:0.8>{% endif %}\n")
 
-    result_no = node.run(str(yaml_file), "", seed=42, jinja_vars='{}')
+    result = node.run(path, "", seed=42, jinja_vars='{}')
 
-    assert result_no[1] == []
-
-    result_yes = node.run(str(yaml_file), "", seed=42, jinja_vars='{"mode": "anime"}')
-
-    assert result_yes[1] == [("anime", 0.8, 0.8)]
-    assert "<lora:" not in result_yes[0]
+    assert result[1] == []
 
 
-def test_node_jinja_vars_json(node, tmp_path):
-    yaml_file = tmp_path / "test.yaml"
-    yaml_file.write_text(
+def test_node_lora_included_by_jinja_condition(node, write_yaml):
+    path = write_yaml("s:\n  - base {% if mode == 'anime' %}<lora:anime:0.8>{% endif %}\n")
+
+    result = node.run(path, "", seed=42, jinja_vars='{"mode": "anime"}')
+
+    assert result[1] == [("anime", 0.8, 0.8)]
+    assert "<lora:" not in result[0]
+
+
+def test_node_jinja_vars_json(node, write_yaml):
+    path = write_yaml(
         "{% if enemy %}\n"
         "combat:\n"
         "  - fighting\n"
@@ -131,35 +135,32 @@ def test_node_jinja_vars_json(node, tmp_path):
         "  - detailed\n"
     )
 
-    result = node.run(str(yaml_file), "", seed=42, jinja_vars='{"enemy": true}')
+    result = node.run(path, "", seed=42, jinja_vars='{"enemy": true}')
 
     assert "fighting" in result[0]
     assert "detailed" in result[0]
 
 
-def test_node_jinja_vars_empty(node, tmp_path):
-    yaml_file = tmp_path / "test.yaml"
-    yaml_file.write_text("meta:\n  - detailed\n")
+def test_node_jinja_vars_empty(node, write_yaml):
+    path = write_yaml("meta:\n  - detailed\n")
 
-    result = node.run(str(yaml_file), "", seed=42, jinja_vars="")
+    result = node.run(path, "", seed=42, jinja_vars="")
 
     assert "detailed" in result[0]
 
 
-def test_node_jinja_vars_invalid_json(node, tmp_path):
-    yaml_file = tmp_path / "test.yaml"
-    yaml_file.write_text("meta:\n  - detailed\n")
+def test_node_jinja_vars_invalid_json(node, write_yaml):
+    path = write_yaml("meta:\n  - detailed\n")
 
-    result = node.run(str(yaml_file), "", seed=42, jinja_vars="{bad json}")
+    result = node.run(path, "", seed=42, jinja_vars="{bad json}")
 
     assert "Invalid JSON" in result[0]
 
 
-def test_node_jinja_error(node, tmp_path):
-    yaml_file = tmp_path / "test.yaml"
-    yaml_file.write_text("{{ undefined_var }}\nmeta:\n  - detailed\n")
+def test_node_jinja_error(node, write_yaml):
+    path = write_yaml("{{ undefined_var }}\nmeta:\n  - detailed\n")
 
-    result = node.run(str(yaml_file), "", seed=42, jinja_vars="{}")
+    result = node.run(path, "", seed=42, jinja_vars="{}")
 
     assert "Jinja2 error" in result[0]
 
