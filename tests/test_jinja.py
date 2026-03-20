@@ -292,6 +292,46 @@ def test_full_pipeline():
     assert any("ultra-detailed" in line for line in flat)
 
 
+def test_break_produces_yaml_section():
+    raw = "{{ break() }}"
+
+    result = render_template(raw, seed=42)
+
+    assert result.startswith("_break_")
+    assert result.endswith(": BREAK")
+
+
+def test_break_in_full_pipeline():
+    raw = (
+        "positive:\n"
+        "  values:\n"
+        "    - beautiful landscape\n"
+        "{{ break() }}\n"
+        "details:\n"
+        "  values:\n"
+        "    - detailed, 8k\n"
+    )
+
+    rendered = render_template(raw, seed=42)
+    data = yaml.safe_load(rendered)
+    parser = YAMLPromptTemplateParser(seed=42)
+    blocks = parser.parse_document(data)
+    flat = [line for block in blocks for line in block]
+
+    assert flat[0] == "beautiful landscape"
+    assert flat[1] == "BREAK"
+    assert flat[2] == "detailed, 8k"
+
+
+def test_break_deterministic():
+    raw = "{{ break() }}"
+
+    r1 = render_template(raw, seed=42)
+    r2 = render_template(raw, seed=42)
+
+    assert r1 == r2
+
+
 def test_full_pipeline_conditional_exclude():
     raw = (
         "{% if add_mood %}\n"

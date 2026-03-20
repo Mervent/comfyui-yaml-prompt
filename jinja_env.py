@@ -126,9 +126,15 @@ def _make_globals(
             return ""
         return rng.choice(lines)
 
+    def break_() -> str:
+        """Render a YAML section that produces a CLIP BREAK token in the prompt."""
+        tag = format(rng.getrandbits(32), '08x')
+        return f"_break_{tag}: BREAK"
+
     return {
         "choice": choice,
         "weighted_choice": weighted_choice,
         "rand": rand,
         "wildcard": wildcard,
+        "break": break_,
     }

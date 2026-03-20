@@ -117,11 +117,7 @@ class YAMLPromptTemplateParser:
         if not isinstance(section, dict) or "chance" not in section:
             return section
 
-        try:
-            chance = float(section["chance"])
-        except (TypeError, ValueError):
-            raise ValueError(f"Invalid chance on section: {section['chance']!r}")
-        chance = max(0.0, min(1.0, chance))
+        chance = self._safe_chance(section["chance"])
 
         if chance < 1.0 and self.rng.random() > chance:
             return None
@@ -218,7 +214,7 @@ class YAMLPromptTemplateParser:
             return self._resolve_choice(self._normalize_choice_block(item), variables)
 
         if isinstance(item, dict) and "name" in item:
-            item_chance = float(item.get("chance", 1))
+            item_chance = self._safe_chance(item.get("chance", 1))
             if item_chance < 1.0 and self.rng.random() > item_chance:
                 return None
             return self.expand_string(str(item["name"]), variables)
@@ -239,7 +235,7 @@ class YAMLPromptTemplateParser:
         self, block: dict[str, Any], variables: dict[str, str]
     ) -> str | None:
         """Pick one option from a choice/oneOf block, applying weights and chance."""
-        chance = float(block.get("chance", 1))
+        chance = self._safe_chance(block.get("chance", 1))
         if chance < 1.0 and self.rng.random() > chance:
             return None
 
@@ -272,10 +268,10 @@ class YAMLPromptTemplateParser:
         weights: list[float] = []
         for opt in options:
             if isinstance(opt, dict):
-                opt_chance = float(opt.get("chance", 1))
+                opt_chance = self._safe_chance(opt.get("chance", 1))
                 if opt_chance < 1.0 and self.rng.random() > opt_chance:
                     continue
-                name, weight = opt.get("name", ""), float(opt.get("weight", 1))
+                name, weight = opt.get("name", ""), self._safe_weight(opt.get("weight", 1))
             else:
                 name, weight = opt, 1.0
             texts.append(self.expand_string(str(name), variables))
@@ -388,3 +384,16 @@ class YAMLPromptTemplateParser:
             low, high = map(float, match.groups())
             return str(round(self.rng.uniform(low, high), 2))
         return text
+
+    def _safe_chance(self, value: Any) -> float:
+        try:
+            chance = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid chance value: {value!r}")
+        return max(0.0, min(1.0, chance))
+
+    def _safe_weight(self, value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid weight value: {value!r}")

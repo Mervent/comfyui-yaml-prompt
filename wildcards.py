@@ -13,5 +13,5 @@ def load_lines(wildcard_dir: Path, name: str) -> list[str]:
             for line in file_path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-    except FileNotFoundError:
+    except OSError:
         return []
