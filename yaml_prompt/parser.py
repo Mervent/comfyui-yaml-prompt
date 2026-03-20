@@ -7,10 +7,7 @@ from typing import Any, Final, Sequence
 
 import yaml
 
-try:
-    from .wildcards import load_lines
-except ImportError:
-    from wildcards import load_lines
+from .wildcards import load_lines
 
 logger = logging.getLogger(__name__)
 

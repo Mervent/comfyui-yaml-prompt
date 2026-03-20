@@ -5,8 +5,8 @@ import pytest
 import yaml
 
 from conftest import INCLUDES_DIR, WILDCARDS_DIR
-from jinja_env import render_template
-from parser import YAMLPromptTemplateParser
+from yaml_prompt.jinja_env import render_template
+from yaml_prompt.parser import YAMLPromptTemplateParser
 
 
 def test_passthrough_no_jinja():

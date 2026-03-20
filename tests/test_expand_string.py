@@ -2,7 +2,7 @@
 
 import pytest
 
-from parser import YAMLPromptTemplateParser
+from yaml_prompt.parser import YAMLPromptTemplateParser
 
 
 def test_plain_string(parser):

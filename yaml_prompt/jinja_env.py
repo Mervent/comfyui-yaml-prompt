@@ -13,10 +13,7 @@ from typing import Any
 
 import jinja2
 
-try:
-    from .wildcards import load_lines
-except ImportError:
-    from wildcards import load_lines
+from .wildcards import load_lines
 
 __all__ = ["create_environment", "render_template"]
 

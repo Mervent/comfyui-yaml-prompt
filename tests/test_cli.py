@@ -1,15 +1,18 @@
-"""Tests for CLI interface (cli.py)."""
+"""Tests for CLI interface (yaml_prompt.cli)."""
 
+import os
 import subprocess
+import sys
 from pathlib import Path
 
-CLI_PY = str(Path(__file__).resolve().parent.parent / "cli.py")
+ROOT = str(Path(__file__).resolve().parent.parent)
 
 
 def _run_cli(*args):
     return subprocess.run(
-        ["python", CLI_PY, *args],
+        [sys.executable, "-m", "yaml_prompt.cli", *args],
         capture_output=True, text=True,
+        env={**os.environ, "PYTHONPATH": ROOT},
     )
 
 

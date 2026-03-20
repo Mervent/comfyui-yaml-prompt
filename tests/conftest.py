@@ -1,53 +1,19 @@
 """Shared fixtures for yaml-prompt parser tests."""
 
-import importlib.util
 import sys
-import types
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
-WILDCARDS_DIR = FIXTURES_DIR / "wildcards"
-INCLUDES_DIR = FIXTURES_DIR / "includes"
-
 sys.path.insert(0, str(ROOT))
 
-from parser import YAMLPromptTemplateParser  # noqa: E402
+from yaml_prompt.parser import YAMLPromptTemplateParser  # noqa: E402
+from yaml_prompt.node import YAMLPromptLoader  # noqa: E402
 
-
-def _import_node_module():
-    """Import node.py despite its relative `from .parser import ...`.
-
-    Creates a synthetic package so that the relative import resolves correctly
-    in the test environment where the project isn't pip-installed.
-    """
-    _PKG = "_yaml_prompt_test_pkg"
-    if _PKG in sys.modules:
-        return sys.modules[f"{_PKG}.node"]
-
-    pkg = types.ModuleType(_PKG)
-    pkg.__path__ = [str(ROOT)]
-    pkg.__package__ = _PKG
-    sys.modules[_PKG] = pkg
-    for py_file in sorted(ROOT.glob("*.py")):
-        name = py_file.stem
-        if name == "__init__":
-            continue
-        if name in sys.modules:
-            sys.modules[f"{_PKG}.{name}"] = sys.modules[name]
-
-    spec = importlib.util.spec_from_file_location(f"{_PKG}.node", ROOT / "node.py")
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    mod.__package__ = _PKG
-    spec.loader.exec_module(mod)
-    sys.modules[f"{_PKG}.node"] = mod
-    return mod
-
-
-_node_mod = _import_node_module()
+FIXTURES_DIR = ROOT / "tests" / "fixtures"
+WILDCARDS_DIR = FIXTURES_DIR / "wildcards"
+INCLUDES_DIR = FIXTURES_DIR / "includes"
 
 
 @pytest.fixture
@@ -72,10 +38,10 @@ def parser(make_parser):
 @pytest.fixture
 def node_class():
     """The YAMLPromptLoader class itself (for class methods)."""
-    return _node_mod.YAMLPromptLoader
+    return YAMLPromptLoader
 
 
 @pytest.fixture
 def node():
     """A fresh YAMLPromptLoader instance."""
-    return _node_mod.YAMLPromptLoader()
+    return YAMLPromptLoader()

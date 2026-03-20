@@ -1,6 +1,6 @@
 """Tests for lora tag extraction and stripping."""
 
-from lora import extract_lora_tags, strip_lora_tags
+from yaml_prompt.lora import extract_lora_tags, strip_lora_tags
 
 
 def test_extract_no_tags():

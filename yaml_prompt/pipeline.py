@@ -6,14 +6,9 @@ from typing import Any
 
 import yaml
 
-try:
-    from .jinja_env import render_template
-    from .lora import extract_lora_tags, strip_lora_tags
-    from .parser import YAMLPromptTemplateParser
-except ImportError:
-    from jinja_env import render_template
-    from lora import extract_lora_tags, strip_lora_tags
-    from parser import YAMLPromptTemplateParser
+from .jinja_env import render_template
+from .lora import extract_lora_tags, strip_lora_tags
+from .parser import YAMLPromptTemplateParser
 
 __all__ = ["process_file", "PipelineError", "PipelineResult"]
 
