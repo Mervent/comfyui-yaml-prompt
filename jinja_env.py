@@ -12,7 +12,11 @@ from pathlib import Path
 from typing import Any
 
 import jinja2
-from wildcards import load_lines
+
+try:
+    from .wildcards import load_lines
+except ImportError:
+    from wildcards import load_lines
 
 __all__ = ["create_environment", "render_template"]
 

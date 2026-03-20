@@ -7,7 +7,10 @@ from typing import Any
 
 __all__ = ["main"]
 
-from pipeline import PipelineError, process_file
+try:
+    from .pipeline import PipelineError, process_file
+except ImportError:
+    from pipeline import PipelineError, process_file
 
 
 def main() -> None:

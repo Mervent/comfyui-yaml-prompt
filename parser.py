@@ -6,7 +6,11 @@ from pathlib import Path
 from typing import Any, Final, Sequence
 
 import yaml
-from wildcards import load_lines
+
+try:
+    from .wildcards import load_lines
+except ImportError:
+    from wildcards import load_lines
 
 logger = logging.getLogger(__name__)
 
