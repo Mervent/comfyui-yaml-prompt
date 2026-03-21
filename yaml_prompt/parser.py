@@ -43,13 +43,21 @@ class YAMLPromptTemplateParser:
         else:
             self.wildcard_dir = self.DEFAULT_WILDCARD_DIR
 
-    def parse_document(self, doc: dict[str, Any]) -> list[list[str]]:
+    def parse_document(
+        self,
+        doc: dict[str, Any],
+        *,
+        namespaces: frozenset[str] = frozenset(),
+    ) -> list[list[str]]:
         """Flatten *doc* into blocks of prompt lines.
 
         Parameters
         ----------
         doc : dict[str, Any]
             YAML mapping as returned by ``yaml.safe_load``.
+        namespaces:
+            Set of namespace identifiers produced by ``merge_documents``.
+            Sections prefixed with a known namespace use scoped variables.
 
         Returns
         -------
@@ -62,17 +70,35 @@ class YAMLPromptTemplateParser:
                 f"Check that your YAML file starts with key: value pairs, not a list."
             )
 
-        variables = self._collect_vars(doc.get("vars", {}), {})
+        global_vars = self._collect_vars(doc.get("vars", {}), {})
+
+        ns_vars: dict[str, dict[str, str]] = {}
+        for ns in namespaces:
+            raw = doc.get(f"{ns}.vars", {})
+            ns_vars[ns] = self._collect_vars(raw if isinstance(raw, dict) else {}, global_vars)
+
+        skip = {"vars"} | {f"{ns}.vars" for ns in namespaces}
 
         blocks: list[list[str]] = []
         for name, section in doc.items():
-            if name == "vars":
+            if name in skip:
                 continue
+            ns = self._match_namespace(name, namespaces)
+            variables = ns_vars[ns] if ns else global_vars
             lines = self._parse_section(section, variables)
             if lines:
                 blocks.append(lines)
 
         return blocks
+
+    @staticmethod
+    def _match_namespace(key: str, namespaces: frozenset[str]) -> str | None:
+        best: str | None = None
+        for ns in namespaces:
+            if key.startswith(f"{ns}."):
+                if best is None or len(ns) > len(best):
+                    best = ns
+        return best
 
     def expand_string(self, text: str, variables: dict[str, str]) -> str:
         """Expand ``$vars``, brace lists, and wildcards until stable."""

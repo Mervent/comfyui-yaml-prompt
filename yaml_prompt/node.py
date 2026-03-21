@@ -25,6 +25,7 @@ class YAMLPromptLoader:
         wildcards_path: str,
         seed: int,
         jinja_vars: str,
+        keep_lora_tags: bool = False,
     ):  # noqa: D401 – API fixed by ComfyUI
         """Load *file_path*, preprocess with Jinja2, parse YAML, return prompt."""
         path = Path(file_path).expanduser().resolve()
@@ -48,6 +49,7 @@ class YAMLPromptLoader:
                 seed=seed,
                 wildcard_dir=wildcard_dir,
                 jinja_vars=vars_dict or None,
+                keep_lora_tags=keep_lora_tags,
             )
         except PipelineError as error:
             return (str(error), [])
@@ -90,8 +92,14 @@ class YAMLPromptLoader:
                     "STRING",
                     {
                         "multiline": True,
-                        "default": "{}",
+                        "default": "",
                         "placeholder": '{"enemy": true, "theme": "dark"}',
+                    },
+                ),
+                "keep_lora_tags": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
                     },
                 ),
             },

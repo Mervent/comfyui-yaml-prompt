@@ -37,6 +37,12 @@ def main() -> None:
         metavar="KEY=VALUE",
         help="Jinja2 context variable (repeatable, e.g. --var enemy=true)",
     )
+    ap.add_argument(
+        "--keep-lora-tags",
+        action="store_true",
+        default=False,
+        help="Keep <lora:...> tags in prompt text instead of stripping them",
+    )
     args = ap.parse_args()
 
     jinja_vars: dict[str, Any] = {}
@@ -52,6 +58,7 @@ def main() -> None:
             seed=args.seed,
             wildcard_dir=args.wildcards_dir,
             jinja_vars=jinja_vars or None,
+            keep_lora_tags=args.keep_lora_tags,
         )
     except PipelineError as error:
         ap.error(str(error))

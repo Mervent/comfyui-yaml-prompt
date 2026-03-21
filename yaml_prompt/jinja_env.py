@@ -132,10 +132,21 @@ def _make_globals(
         tag = format(rng.getrandbits(32), '08x')
         return f"_break_{tag}: BREAK"
 
+    @jinja2.pass_context
+    def yaml_include(context: Any, filename: str, namespace: str | None = None) -> str:
+        """Include a YAML file as a namespaced YAML document."""
+        if namespace is None:
+            namespace = format(rng.getrandbits(24), '06x')
+        env = context.environment
+        template = env.get_template(filename)
+        rendered = template.render(context.get_all())
+        return f"---\n_namespace: {namespace}\n{rendered}\n---"
+
     return {
         "choice": choice,
         "weighted_choice": weighted_choice,
         "rand": rand,
         "wildcard": wildcard,
         "break": break_,
+        "yaml_include": yaml_include,
     }
