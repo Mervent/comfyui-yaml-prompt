@@ -88,18 +88,18 @@ class YAMLPromptLoader:
                         "placeholder": "Seed for deterministic randomness",
                     },
                 ),
+                "keep_lora_tags": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                    },
+                ),
                 "jinja_vars": (
                     "STRING",
                     {
                         "multiline": True,
                         "default": "",
                         "placeholder": '{"enemy": true, "theme": "dark"}',
-                    },
-                ),
-                "keep_lora_tags": (
-                    "BOOLEAN",
-                    {
-                        "default": False,
                     },
                 ),
             },
