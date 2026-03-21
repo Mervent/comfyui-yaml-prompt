@@ -1,0 +1,4 @@
+{{ yaml_include('ns_nested_inner.yaml', 'inner') }}
+lighting:
+  - dramatic shadows
+  - volumetric fog

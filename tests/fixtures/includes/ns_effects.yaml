@@ -1,0 +1,7 @@
+vars:
+  weight: "0.8"
+effects:
+  block_template: ($value:$weight)
+  values:
+    - sparkles
+    - glow
