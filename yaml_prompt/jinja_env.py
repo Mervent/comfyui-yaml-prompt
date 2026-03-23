@@ -6,6 +6,7 @@ This module owns Phase 1 (Jinja2 preprocessing).
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import random
 from pathlib import Path
@@ -88,13 +89,14 @@ def create_environment(
     else:
         rng = random.Random()
 
-    env.globals.update(_make_globals(rng, wildcard_dir))
+    env.globals.update(_make_globals(rng, wildcard_dir, seed))
     return env
 
 
 def _make_globals(
     rng: random.Random,
     wildcard_dir: Path | None = None,
+    seed: int | None = None,
 ) -> dict[str, Any]:
     """Build Jinja2 template globals: choice, weighted_choice, rand, wildcard."""
 
@@ -125,6 +127,11 @@ def _make_globals(
         if not lines:
             logger.warning("Wildcard file not found: %s", wildcard_dir / f"{name}.txt")
             return ""
+        if seed is not None:
+            key = f"{seed}:{name}".encode("utf-8")
+            digest = hashlib.sha256(key).digest()
+            idx = int.from_bytes(digest[:8], "big") % len(lines)
+            return lines[idx]
         return rng.choice(lines)
 
     def break_() -> str:

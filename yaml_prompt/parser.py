@@ -400,7 +400,7 @@ class YAMLPromptTemplateParser:
         """Return an index derived from the seed and *name*, bypassing RNG state."""
         if self.seed is None:
             return self.rng.randrange(n)
-        key = f"{self.seed}:{str(self.wildcard_dir)}:{name}".encode("utf-8")
+        key = f"{self.seed}:{name}".encode("utf-8")
         digest = hashlib.sha256(key).digest()
         return int.from_bytes(digest[:8], "big") % n
 

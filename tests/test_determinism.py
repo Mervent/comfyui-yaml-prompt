@@ -1,5 +1,26 @@
 """Tests for seed reproducibility guarantees."""
 
+from pathlib import Path
+
+from yaml_prompt.jinja_env import render_template
+
+WILDCARDS_DIR = Path(__file__).resolve().parent / "fixtures" / "wildcards"
+
+
+def test_jinja_and_yaml_wildcard_agree(make_parser):
+    seed = 42
+    jinja_result = render_template(
+        "{{ wildcard('colors') }}",
+        seed=seed,
+        wildcard_dir=WILDCARDS_DIR,
+    )
+
+    parser = make_parser(seed=seed)
+    blocks = parser.parse_document({"s": ["__colors__"]})
+    yaml_result = blocks[0][0]
+
+    assert jinja_result == yaml_result
+
 
 def test_same_seed_same_output(make_parser):
     doc = {
