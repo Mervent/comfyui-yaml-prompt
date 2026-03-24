@@ -286,3 +286,117 @@ class TestYamlIncludeRoundTrip:
 
         with pytest.raises(PipelineError, match="Duplicate namespace"):
             merge_documents(docs)
+
+
+class TestScopedIncludeRNG:
+
+    @staticmethod
+    def _extract_child_content(rendered: str, namespace: str) -> dict | None:
+        for doc in yaml.safe_load_all(rendered):
+            if isinstance(doc, dict) and doc.get("_namespace") == namespace:
+                return doc
+        return None
+
+    def test_same_child_from_different_parents(self):
+        parent_a = (
+            '{{ choice("x", "y", "z") }}\n'
+            '{{ yaml_include("ns_random.yaml", "child") }}\n'
+            "meta:\n  - a\n"
+        )
+        parent_b = (
+            '{{ choice("1", "2") }}\n'
+            '{{ choice("p", "q") }}\n'
+            '{{ choice("j", "k", "l", "m") }}\n'
+            '{{ yaml_include("ns_random.yaml", "child") }}\n'
+            "meta:\n  - b\n"
+        )
+
+        rendered_a = render_template(parent_a, search_paths=[INCLUDES_DIR], seed=42)
+        rendered_b = render_template(parent_b, search_paths=[INCLUDES_DIR], seed=42)
+
+        child_a = self._extract_child_content(rendered_a, "child")
+        child_b = self._extract_child_content(rendered_b, "child")
+
+        assert child_a is not None
+        assert child_a == child_b
+
+    def test_duplicate_include_produces_identical_content(self):
+        raw = (
+            '{{ yaml_include("ns_random.yaml", "first") }}\n'
+            '{{ choice("noise", "filler") }}\n'
+            '{{ yaml_include("ns_random.yaml", "second") }}\n'
+            "meta:\n  - x\n"
+        )
+
+        rendered = render_template(raw, search_paths=[INCLUDES_DIR], seed=42)
+
+        first = self._extract_child_content(rendered, "first")
+        second = self._extract_child_content(rendered, "second")
+
+        assert first is not None
+        assert second is not None
+        first_content = {k: v for k, v in first.items() if k != "_namespace"}
+        second_content = {k: v for k, v in second.items() if k != "_namespace"}
+        assert first_content == second_content
+
+    def test_nested_include_child_stable_across_parents(self):
+        parent_a = (
+            '{{ yaml_include("ns_random_outer.yaml", "outer") }}\n'
+            "meta:\n  - a\n"
+        )
+        parent_b = (
+            '{{ choice("a", "b", "c") }}\n'
+            '{{ choice("d", "e", "f") }}\n'
+            '{{ yaml_include("ns_random_outer.yaml", "outer") }}\n'
+            "meta:\n  - b\n"
+        )
+
+        rendered_a = render_template(parent_a, search_paths=[INCLUDES_DIR], seed=42)
+        rendered_b = render_template(parent_b, search_paths=[INCLUDES_DIR], seed=42)
+
+        inner_a = self._extract_child_content(rendered_a, "rng_inner")
+        inner_b = self._extract_child_content(rendered_b, "rng_inner")
+
+        assert inner_a is not None
+        assert inner_a == inner_b
+
+    def test_no_seed_skips_scoping(self):
+        raw = (
+            '{{ yaml_include("ns_random.yaml", "child") }}\n'
+            "meta:\n  - x\n"
+        )
+
+        results = set()
+        for _ in range(30):
+            rendered = render_template(raw, search_paths=[INCLUDES_DIR])
+            child = self._extract_child_content(rendered, "child")
+            results.add(str(child))
+
+        assert len(results) > 1
+
+    def test_different_seeds_produce_different_child(self):
+        raw = '{{ yaml_include("ns_random.yaml", "child") }}\nmeta:\n  - x\n'
+
+        results = set()
+        for seed in range(20):
+            rendered = render_template(raw, search_paths=[INCLUDES_DIR], seed=seed)
+            child = self._extract_child_content(rendered, "child")
+            results.add(str(child))
+
+        assert len(results) > 1
+
+    def test_different_files_get_different_scoped_rng(self):
+        raw = (
+            '{{ yaml_include("ns_random.yaml", "rng") }}\n'
+            '{{ yaml_include("ns_common.yaml", "common") }}\n'
+            "meta:\n  - x\n"
+        )
+
+        rendered = render_template(raw, search_paths=[INCLUDES_DIR], seed=42)
+
+        rng_doc = self._extract_child_content(rendered, "rng")
+        common_doc = self._extract_child_content(rendered, "common")
+
+        assert rng_doc is not None
+        assert common_doc is not None
+        assert rng_doc != common_doc

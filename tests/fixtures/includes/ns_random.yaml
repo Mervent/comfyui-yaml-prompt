@@ -1,0 +1,4 @@
+mood:
+  - {{ choice('serene', 'dramatic', 'eerie', 'vibrant') }}
+intensity:
+  - {{ rand(0, 1) }}
