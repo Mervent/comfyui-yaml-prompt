@@ -97,3 +97,142 @@ def test_named_item_without_chance(parser):
     result = parser._resolve_item({"name": "hello"}, {})
 
     assert result == "hello"
+
+
+def test_nested_choice_basic(parser):
+    result = parser._resolve_item(
+        {"choice": {"values": [
+            {"choice": {"values": ["a", "b"]}},
+            {"choice": {"values": ["c", "d"]}},
+        ]}},
+        {},
+    )
+
+    assert result in ("a", "b", "c", "d")
+
+
+def test_nested_oneof_alias(parser):
+    result = parser._resolve_item(
+        {"oneOf": {"values": [
+            {"oneOf": {"values": ["x", "y"]}},
+            {"oneOf": {"values": ["z"]}},
+        ]}},
+        {},
+    )
+
+    assert result in ("x", "y", "z")
+
+
+def test_nested_choice_three_levels(parser):
+    result = parser._resolve_item(
+        {"choice": {"values": [
+            {"choice": {"values": [
+                {"choice": {"values": ["deep_a", "deep_b"]}},
+            ]}},
+        ]}},
+        {},
+    )
+
+    assert result in ("deep_a", "deep_b")
+
+
+def test_nested_choice_with_weight(make_parser):
+    heavy_count = sum(
+        1
+        for seed in range(200)
+        if make_parser(seed=seed)._resolve_item(
+            {"choice": {"values": [
+                {"choice": {"values": ["a"]}, "weight": 10},
+                {"choice": {"values": ["b"]}, "weight": 1},
+            ]}},
+            {},
+        )
+        == "a"
+    )
+
+    assert heavy_count > 150
+
+
+def test_nested_choice_inner_chance(parser):
+    result = parser._resolve_item(
+        {"choice": {"values": [
+            {"choice": {"chance": 0, "values": ["never"]}},
+            "fallback",
+        ]}},
+        {},
+    )
+
+    assert result in (None, "fallback")
+
+
+def test_nested_choice_inner_template(parser):
+    result = parser._resolve_item(
+        {"choice": {"values": [
+            {"choice": {"template": "($value:1.2)", "values": ["fire"]}},
+        ]}},
+        {},
+    )
+
+    assert result == "(fire:1.2)"
+
+
+def test_nested_choice_all_skipped(parser):
+    result = parser._resolve_item(
+        {"choice": {"values": [
+            {"choice": {"chance": 0, "values": ["a"]}},
+            {"choice": {"chance": 0, "values": ["b"]}},
+        ]}},
+        {},
+    )
+
+    assert result is None
+
+
+def test_nested_choice_depth_exceeded(parser):
+    block = {"values": ["leaf"]}
+    for _ in range(20):
+        block = {"values": [{"choice": block}]}
+
+    with pytest.raises(ValueError, match="Nested choice depth exceeded"):
+        parser._resolve_item({"choice": block}, {})
+
+
+def test_nested_choice_deterministic(make_parser):
+    item = {"choice": {"values": [
+        {"choice": {"values": ["a", "b", "c"]}},
+        {"choice": {"values": ["x", "y", "z"]}},
+    ]}}
+
+    results = [make_parser(seed=42)._resolve_item(item, {}) for _ in range(10)]
+
+    assert all(r == results[0] for r in results)
+
+
+def test_nested_choice_with_variables(parser):
+    result = parser._resolve_item(
+        {"choice": {"values": [
+            {"choice": {"values": ["$color ball"]}},
+        ]}},
+        {"color": "red"},
+    )
+
+    assert result == "red ball"
+
+
+def test_nested_choice_in_section(parser):
+    section = {
+        "values": [
+            "intro",
+            {"choice": {"values": [
+                {"choice": {"values": ["inner_a", "inner_b"]}},
+                "flat_option",
+            ]}},
+        ],
+    }
+
+    result = parser._parse_section(section, {})
+
+    assert len(result) >= 1
+    joined = " ".join(result)
+    assert "intro" in joined
+    assert any(v in joined for v in ("inner_a", "inner_b", "flat_option"))

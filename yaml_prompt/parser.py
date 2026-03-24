@@ -5,8 +5,6 @@ import re
 from pathlib import Path
 from typing import Any, Final, Sequence
 
-import yaml
-
 from .wildcards import load_lines
 
 logger = logging.getLogger(__name__)
@@ -20,9 +18,12 @@ class YAMLPromptTemplateParser:
 
     DEFAULT_WILDCARD_DIR: Final[Path] = Path(__file__).with_name("wildcards")
     MAX_EXPANSION_DEPTH: Final[int] = 64
+    MAX_CHOICE_DEPTH: Final[int] = 16
 
     @staticmethod
-    def _stable_select(seed: int, items: list[str], weights: list[float] | None = None) -> str:
+    def _stable_select(
+        seed: int, items: list[str], weights: list[float] | None = None
+    ) -> str:
         """Pick from *items* using SHA-256(seed + joined items) — stable across
         independent parser instances sharing the same seed, regardless of RNG state.
         """
@@ -95,7 +96,9 @@ class YAMLPromptTemplateParser:
         ns_vars: dict[str, dict[str, str]] = {}
         for ns in namespaces:
             raw = doc.get(f"{ns}.vars", {})
-            ns_vars[ns] = self._collect_vars(raw if isinstance(raw, dict) else {}, global_vars)
+            ns_vars[ns] = self._collect_vars(
+                raw if isinstance(raw, dict) else {}, global_vars
+            )
 
         skip = {"vars"} | {f"{ns}.vars" for ns in namespaces}
 
@@ -149,7 +152,9 @@ class YAMLPromptTemplateParser:
         if section is None:
             return []
 
-        variables, item_tpl, block_tpl = self._extract_section_config(section, variables)
+        variables, item_tpl, block_tpl = self._extract_section_config(
+            section, variables
+        )
         items = self._extract_items(section)
         is_simple_plain = (
             all(isinstance(e, str) for e in items)
@@ -157,7 +162,9 @@ class YAMLPromptTemplateParser:
             and block_tpl is None
         )
         rendered_lines = self._render_items(items, variables, item_tpl)
-        return self._apply_templates(is_simple_plain, rendered_lines, block_tpl, variables)
+        return self._apply_templates(
+            is_simple_plain, rendered_lines, block_tpl, variables
+        )
 
     def _apply_chance(self, section: Any) -> Any | None:
         """Evaluate section-level chance; return cleaned section or ``None`` if skipped."""
@@ -188,7 +195,9 @@ class YAMLPromptTemplateParser:
             raw_item_tpl, raw_block_tpl = "$value", None
 
         item_tpl = self.expand_string(raw_item_tpl, variables)
-        block_tpl = self.expand_string(raw_block_tpl, variables) if raw_block_tpl else None
+        block_tpl = (
+            self.expand_string(raw_block_tpl, variables) if raw_block_tpl else None
+        )
 
         return variables, item_tpl, block_tpl
 
@@ -201,7 +210,9 @@ class YAMLPromptTemplateParser:
             return section
         return [section]
 
-    def _render_items(self, items: list, variables: dict[str, str], item_tpl: str) -> list[str]:
+    def _render_items(
+        self, items: list, variables: dict[str, str], item_tpl: str
+    ) -> list[str]:
         """Render items into a list of template-applied strings."""
         rendered: list[str] = []
         pending: list[str] = []
@@ -215,7 +226,9 @@ class YAMLPromptTemplateParser:
                 result = self._resolve_item(item, variables)
                 if result is not None:
                     pending.append(result)
-                rendered.append(self._apply_item_template(", ".join(pending), item_tpl, variables))
+                rendered.append(
+                    self._apply_item_template(", ".join(pending), item_tpl, variables)
+                )
                 pending = []
                 continue
 
@@ -279,7 +292,10 @@ class YAMLPromptTemplateParser:
         return any(k in item for k in self.CHOICE_KEYS)
 
     def _resolve_choice(
-        self, block: dict[str, Any], variables: dict[str, str]
+        self,
+        block: dict[str, Any],
+        variables: dict[str, str],
+        _depth: int = 0,
     ) -> str | None:
         """Pick one option from a choice/oneOf block, applying weights and chance."""
         chance = self._safe_chance(block.get("chance", 1))
@@ -291,7 +307,9 @@ class YAMLPromptTemplateParser:
         if options is None:
             raise ValueError("choice/oneOf requires 'values', 'options', or 'choices'.")
 
-        texts, weights = self._filter_and_weigh_options(options, variables)
+        texts, weights = self._filter_and_weigh_options(
+            options, variables, _depth=_depth
+        )
         if not texts:
             return None
 
@@ -308,25 +326,57 @@ class YAMLPromptTemplateParser:
         return block
 
     def _filter_and_weigh_options(
-        self, options: list, variables: dict[str, str]
+        self,
+        options: list,
+        variables: dict[str, str],
+        _depth: int = 0,
     ) -> tuple[list[str], list[float]]:
-        """Filter *options* by per-item chance, return ``(texts, weights)``."""
+        """Filter *options* by per-item chance, return ``(texts, weights)``.
+
+        Nested choice/oneOf blocks are resolved recursively up to
+        ``MAX_CHOICE_DEPTH`` levels.
+        """
+        if _depth > self.MAX_CHOICE_DEPTH:
+            raise ValueError(
+                f"Nested choice depth exceeded ({self.MAX_CHOICE_DEPTH} levels). "
+                f"Check for accidentally recursive choice definitions."
+            )
+
         texts: list[str] = []
         weights: list[float] = []
         for opt in options:
-            if isinstance(opt, dict):
+            if isinstance(opt, dict) and self._is_choice_item(opt):
+                # Nested choice block — extract sibling weight, resolve recursively.
+                weight = self._safe_weight(opt.get("weight", 1))
+                clean = {k: v for k, v in opt.items() if k != "weight"}
+                resolved = self._resolve_choice(
+                    self._normalize_choice_block(clean),
+                    variables,
+                    _depth=_depth + 1,
+                )
+                if resolved is None:
+                    continue
+                texts.append(resolved)
+                weights.append(weight)
+            elif isinstance(opt, dict):
                 opt_chance = self._safe_chance(opt.get("chance", 1))
                 if opt_chance < 1.0 and self.rng.random() > opt_chance:
                     continue
-                name, weight = opt.get("name", ""), self._safe_weight(opt.get("weight", 1))
+                name, weight = (
+                    opt.get("name", ""),
+                    self._safe_weight(opt.get("weight", 1)),
+                )
+                texts.append(self.expand_string(str(name), variables))
+                weights.append(weight)
             else:
                 name, weight = opt, 1.0
-            texts.append(self.expand_string(str(name), variables))
-            weights.append(weight)
+                texts.append(self.expand_string(str(name), variables))
+                weights.append(weight)
         return texts, weights
 
     def _substitute_variables(self, text: str, variables: dict[str, str]) -> str:
         """Replace ``$name`` references with their values from *variables*."""
+
         def repl(match: re.Match[str]) -> str:
             return variables.get(match.group(1), match.group(0))
 
@@ -357,13 +407,16 @@ class YAMLPromptTemplateParser:
 
     def _substitute_wildcards(self, text: str) -> str:
         """Replace ``__name__`` wildcard tokens with lines from text files."""
+
         def repl(match: re.Match[str]) -> str:
             name = match.group(1)
             candidates = self._load_wildcard(name)
             if not candidates:
                 logger.warning(
                     "Wildcard '%s' not found or empty: %s/%s.txt",
-                    name, self.wildcard_dir, name,
+                    name,
+                    self.wildcard_dir,
+                    name,
                 )
                 return ""
             idx = self._seed_derived_index(name, len(candidates))
@@ -399,7 +452,10 @@ class YAMLPromptTemplateParser:
         return self.expand_string(item_tpl.replace("$value", text), variables)
 
     def _flush_pending(
-        self, pending: list[str], item_tpl: str, variables: dict[str, str],
+        self,
+        pending: list[str],
+        item_tpl: str,
+        variables: dict[str, str],
     ) -> str | None:
         if not pending:
             return None
