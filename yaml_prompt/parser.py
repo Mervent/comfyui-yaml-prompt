@@ -21,6 +21,27 @@ class YAMLPromptTemplateParser:
     DEFAULT_WILDCARD_DIR: Final[Path] = Path(__file__).with_name("wildcards")
     MAX_EXPANSION_DEPTH: Final[int] = 64
 
+    @staticmethod
+    def _stable_select(seed: int, items: list[str], weights: list[float] | None = None) -> str:
+        """Pick from *items* using SHA-256(seed + joined items) — stable across
+        independent parser instances sharing the same seed, regardless of RNG state.
+        """
+        key = f"{seed}:choice:{'|'.join(items)}".encode("utf-8")
+        digest = hashlib.sha256(key).digest()
+
+        if weights is None or all(w == weights[0] for w in weights):
+            idx = int.from_bytes(digest[:8], "big") % len(items)
+            return items[idx]
+
+        hash_float = int.from_bytes(digest[:8], "big") / (1 << 64)
+        total = sum(weights)
+        cumulative = 0.0
+        for i, w in enumerate(weights):
+            cumulative += w / total
+            if hash_float < cumulative:
+                return items[i]
+        return items[-1]
+
     VARIABLE_PATTERN = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
     BRACE_PATTERN = re.compile(r"\{([^{}]+)\}")  # {a|0.5::b|c}
     WILDCARD_PATTERN = re.compile(r"__([A-Za-z0-9_]+)__")
@@ -30,11 +51,10 @@ class YAMLPromptTemplateParser:
 
     def __init__(self, seed: int | None = None, wildcard_dir: Path | str | None = None):
         """Create a parser with optional seed and wildcard directory."""
-        if seed is not None:
-            self.rng = random.Random(seed)
-        else:
-            self.rng = random.Random()
+        if seed is None:
+            seed = random.randint(0, 2**63 - 1)
 
+        self.rng = random.Random(seed)
         self.seed = seed
         self._wildcard_cache: dict[tuple[Path, str], list[str]] = {}
 
@@ -275,7 +295,7 @@ class YAMLPromptTemplateParser:
         if not texts:
             return None
 
-        chosen = self.rng.choices(texts, weights)[0]
+        chosen = self._stable_select(self.seed, texts, weights)
         return self.expand_string(template.replace("$value", chosen), variables)
 
     def _normalize_choice_block(self, item: dict) -> dict:
@@ -333,7 +353,7 @@ class YAMLPromptTemplateParser:
 
         if not options:
             return ""
-        return self.rng.choices(options, weights)[0]
+        return self._stable_select(self.seed, options, weights)
 
     def _substitute_wildcards(self, text: str) -> str:
         """Replace ``__name__`` wildcard tokens with lines from text files."""
@@ -398,8 +418,6 @@ class YAMLPromptTemplateParser:
 
     def _seed_derived_index(self, name: str, n: int) -> int:
         """Return an index derived from the seed and *name*, bypassing RNG state."""
-        if self.seed is None:
-            return self.rng.randrange(n)
         key = f"{self.seed}:{name}".encode("utf-8")
         digest = hashlib.sha256(key).digest()
         return int.from_bytes(digest[:8], "big") % n

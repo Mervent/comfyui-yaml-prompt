@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Sequence
@@ -65,6 +66,9 @@ def process_file(
     jinja_vars: dict[str, Any] | None = None,
     keep_lora_tags: bool = False,
 ) -> PipelineResult:
+    if seed is None:
+        seed = random.randint(0, 2**63 - 1)
+
     file_path = file_path.expanduser().resolve()
     if wildcard_dir is None:
         wildcard_dir = file_path.parent / "wildcards"

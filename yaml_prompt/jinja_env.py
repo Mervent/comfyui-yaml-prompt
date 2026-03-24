@@ -25,6 +25,27 @@ logger = logging.getLogger(__name__)
 _JINJA_SEED_SALT: int = 0x6A696E6A  # "jinj" as 4 ASCII bytes
 
 
+def _stable_select(seed: int, items: list[str], weights: list[float] | None = None) -> str:
+    """Pick from *items* using SHA-256(seed + joined items) — stable across
+    independent template renders sharing the same seed, regardless of RNG state.
+    """
+    key = f"{seed}:choice:{'|'.join(items)}".encode("utf-8")
+    digest = hashlib.sha256(key).digest()
+
+    if weights is None or all(w == weights[0] for w in weights):
+        idx = int.from_bytes(digest[:8], "big") % len(items)
+        return items[idx]
+
+    hash_float = int.from_bytes(digest[:8], "big") / (1 << 64)
+    total = sum(weights)
+    cumulative = 0.0
+    for i, w in enumerate(weights):
+        cumulative += w / total
+        if hash_float < cumulative:
+            return items[i]
+    return items[-1]
+
+
 def _derive_include_seed(original_seed: int, filename: str) -> int:
     """Derive a deterministic seed for an included template.
 
@@ -96,11 +117,10 @@ def create_environment(
         undefined=jinja2.StrictUndefined,
     )
 
-    if seed is not None:
-        rng = random.Random(seed ^ _JINJA_SEED_SALT)
-    else:
-        rng = random.Random()
+    if seed is None:
+        seed = random.randint(0, 2**63 - 1)
 
+    rng = random.Random(seed ^ _JINJA_SEED_SALT)
     env.globals.update(_make_globals(rng, wildcard_dir, seed))
     return env
 
@@ -108,7 +128,7 @@ def create_environment(
 def _make_globals(
     rng: random.Random,
     wildcard_dir: Path | None = None,
-    seed: int | None = None,
+    seed: int = 0,
     original_seed: int | None = None,
 ) -> dict[str, Any]:
     """Build Jinja2 template globals: choice, weighted_choice, rand, wildcard."""
@@ -118,15 +138,15 @@ def _make_globals(
         """Pick one item uniformly at random."""
         if not items:
             return ""
-        return rng.choice(items)
+        return _stable_select(seed, list(items))
 
     def weighted_choice(items_with_weights: list[list[Any]]) -> str:
         """Pick from weighted items.  Each element is ``[value, weight]``."""
         if not items_with_weights:
             return ""
-        values = [i[0] for i in items_with_weights]
+        values = [str(i[0]) for i in items_with_weights]
         weights = [float(i[1]) for i in items_with_weights]
-        return str(rng.choices(values, weights)[0])
+        return _stable_select(seed, values, weights)
 
     def rand(lo: float = 0.0, hi: float = 1.0) -> float:
         """Random float in *[lo, hi]*, rounded to 2 decimal places."""
@@ -141,12 +161,10 @@ def _make_globals(
         if not lines:
             logger.warning("Wildcard file not found: %s", wildcard_dir / f"{name}.txt")
             return ""
-        if seed is not None:
-            key = f"{seed}:{name}".encode("utf-8")
-            digest = hashlib.sha256(key).digest()
-            idx = int.from_bytes(digest[:8], "big") % len(lines)
-            return lines[idx]
-        return rng.choice(lines)
+        key = f"{seed}:{name}".encode("utf-8")
+        digest = hashlib.sha256(key).digest()
+        idx = int.from_bytes(digest[:8], "big") % len(lines)
+        return lines[idx]
 
     def break_() -> str:
         """Render a YAML section that produces a CLIP BREAK token in the prompt."""
@@ -166,15 +184,12 @@ def _make_globals(
         env = context.environment
         template = env.get_template(filename)
 
-        if _original_seed is not None:
-            child_seed = _derive_include_seed(_original_seed, filename)
-            child_rng = random.Random(child_seed ^ _JINJA_SEED_SALT)
-            child_globals = _make_globals(
-                child_rng, wildcard_dir, child_seed, _original_seed,
-            )
-            ctx = {**context.get_all(), **child_globals}
-        else:
-            ctx = context.get_all()
+        child_seed = _derive_include_seed(_original_seed, filename)
+        child_rng = random.Random(child_seed ^ _JINJA_SEED_SALT)
+        child_globals = _make_globals(
+            child_rng, wildcard_dir, child_seed, _original_seed,
+        )
+        ctx = {**context.get_all(), **child_globals}
 
         rendered = template.render(ctx)
         return f"---\n_namespace: {namespace}\n{rendered}\n---"
