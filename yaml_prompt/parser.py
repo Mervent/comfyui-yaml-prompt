@@ -43,6 +43,12 @@ class YAMLPromptTemplateParser:
                 return items[i]
         return items[-1]
 
+    def _stable_chance(self, chance: float, content: Any) -> bool:
+        key = f"{self.seed}:chance:{content}".encode("utf-8")
+        digest = hashlib.sha256(key).digest()
+        roll = int.from_bytes(digest[:8], "big") / (1 << 64)
+        return roll <= chance
+
     VARIABLE_PATTERN = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
     BRACE_PATTERN = re.compile(r"\{([^{}]+)\}")  # {a|0.5::b|c}
     WILDCARD_PATTERN = re.compile(r"__([A-Za-z0-9_]+)__")
@@ -172,11 +178,12 @@ class YAMLPromptTemplateParser:
             return section
 
         chance = self._safe_chance(section["chance"])
+        content = {k: v for k, v in section.items() if k != "chance"}
 
-        if chance < 1.0 and self.rng.random() > chance:
+        if chance < 1.0 and not self._stable_chance(chance, content):
             return None
 
-        return {k: v for k, v in section.items() if k != "chance"}
+        return content
 
     def _extract_section_config(
         self, section: Any, variables: dict[str, str]
@@ -275,7 +282,7 @@ class YAMLPromptTemplateParser:
 
         if isinstance(item, dict) and "name" in item:
             item_chance = self._safe_chance(item.get("chance", 1))
-            if item_chance < 1.0 and self.rng.random() > item_chance:
+            if item_chance < 1.0 and not self._stable_chance(item_chance, item):
                 return None
             return self.expand_string(str(item["name"]), variables)
 
@@ -299,7 +306,7 @@ class YAMLPromptTemplateParser:
     ) -> str | None:
         """Pick one option from a choice/oneOf block, applying weights and chance."""
         chance = self._safe_chance(block.get("chance", 1))
-        if chance < 1.0 and self.rng.random() > chance:
+        if chance < 1.0 and not self._stable_chance(chance, block):
             return None
 
         template = block.get("template", "$value")
@@ -360,7 +367,7 @@ class YAMLPromptTemplateParser:
                 weights.append(weight)
             elif isinstance(opt, dict):
                 opt_chance = self._safe_chance(opt.get("chance", 1))
-                if opt_chance < 1.0 and self.rng.random() > opt_chance:
+                if opt_chance < 1.0 and not self._stable_chance(opt_chance, opt):
                     continue
                 name, weight = (
                     opt.get("name", ""),

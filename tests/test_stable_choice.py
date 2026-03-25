@@ -2,6 +2,7 @@
 
 from yaml_prompt.jinja_env import render_template
 from yaml_prompt.parser import YAMLPromptTemplateParser
+from yaml_prompt.pipeline import process_file
 
 from conftest import WILDCARDS_DIR
 
@@ -214,3 +215,133 @@ def test_same_brace_in_independent_parsers(make_parser):
     general_lines = [l for b in general_blocks for l in b if "expression" in l]
 
     assert face_lines[0] == general_lines[0]
+
+
+# --- Stable chance across independent parsers ---
+
+
+def test_section_chance_stable_across_parsers(make_parser):
+    section = {"chance": 0.5, "values": ["blood and gore"]}
+    doc_bare = {"violence": section}
+    doc_with_prefix = {
+        "meta": ["ultra-detailed", "masterpiece"],
+        "violence": section,
+    }
+
+    bare = make_parser(seed=SEED).parse_document(doc_bare)
+    with_prefix = make_parser(seed=SEED).parse_document(doc_with_prefix)
+
+    bare_has = len(bare) > 0 and any("blood" in l for b in bare for l in b)
+    prefix_has = any("blood" in l for b in with_prefix for l in b)
+
+    assert bare_has == prefix_has
+
+
+def test_named_item_chance_stable_across_parsers(make_parser):
+    item = {"name": "dramatic volumetric lighting", "chance": 0.5}
+    doc_bare = {"effects": {"values": [item]}}
+    doc_with_prefix = {
+        "meta": ["ultra-detailed"],
+        "filler": {"values": ["{a|b|c|d|e}"]},
+        "effects": {"values": [item]},
+    }
+
+    bare = make_parser(seed=SEED).parse_document(doc_bare)
+    with_prefix = make_parser(seed=SEED).parse_document(doc_with_prefix)
+
+    bare_has = any("dramatic" in l for b in bare for l in b)
+    prefix_has = any("dramatic" in l for b in with_prefix for l in b)
+
+    assert bare_has == prefix_has
+
+
+def test_choice_block_chance_stable_across_parsers(make_parser):
+    choice_block = {"choice": {"chance": 0.5, "values": ["depth-of-field", "bokeh"]}}
+    doc_bare = {"effects": {"values": [choice_block]}}
+    doc_with_prefix = {
+        "meta": ["ultra-detailed"],
+        "effects": {"values": [choice_block]},
+    }
+
+    bare = make_parser(seed=SEED).parse_document(doc_bare)
+    with_prefix = make_parser(seed=SEED).parse_document(doc_with_prefix)
+
+    bare_has = any("depth" in l or "bokeh" in l for b in bare for l in b)
+    prefix_has = any("depth" in l or "bokeh" in l for b in with_prefix for l in b)
+
+    assert bare_has == prefix_has
+
+
+def test_option_chance_stable_across_parsers(make_parser):
+    choice_block = {"choice": {"values": [
+        {"name": "blood", "chance": 0.5},
+        "wounded",
+    ]}}
+    doc_bare = {"violence": {"values": [choice_block]}}
+    doc_with_prefix = {
+        "meta": ["filler"],
+        "violence": {"values": [choice_block]},
+    }
+
+    for s in range(50):
+        bare = make_parser(seed=s).parse_document(doc_bare)
+        with_prefix = make_parser(seed=s).parse_document(doc_with_prefix)
+
+        bare_violence = bare[-1]
+        prefix_violence = with_prefix[-1]
+        assert bare_violence == prefix_violence, f"seed={s}"
+
+
+def test_chance_distribution_holds(make_parser):
+    doc = {"s": {"chance": 0.25, "values": ["content"]}}
+
+    pass_count = sum(
+        1 for s in range(500)
+        if make_parser(seed=s).parse_document(doc)
+    )
+
+    assert 75 < pass_count < 175
+
+
+# --- Full pipeline: two separate YAML files (two ComfyUI nodes) ---
+
+
+def test_two_yaml_files_same_choices_and_chances(tmp_path):
+    face_yaml = tmp_path / "face.yaml"
+    face_yaml.write_text(
+        "face:\n"
+        "  - detailed portrait\n"
+        "expression:\n"
+        "  - '{smiling|frowning|surprised} expression'\n"
+        "effects:\n"
+        "  chance: 0.5\n"
+        "  values:\n"
+        "    - dramatic lighting\n"
+    )
+
+    general_yaml = tmp_path / "general.yaml"
+    general_yaml.write_text(
+        "body:\n"
+        "  - full body shot\n"
+        "  - cinematic\n"
+        "expression:\n"
+        "  - '{smiling|frowning|surprised} expression'\n"
+        "effects:\n"
+        "  chance: 0.5\n"
+        "  values:\n"
+        "    - dramatic lighting\n"
+    )
+
+    face_result = process_file(face_yaml, seed=SEED)
+    general_result = process_file(general_yaml, seed=SEED)
+
+    face_blocks = [l for b in face_result.blocks for l in b]
+    general_blocks = [l for b in general_result.blocks for l in b]
+
+    face_expr = [l for l in face_blocks if "expression" in l][0]
+    general_expr = [l for l in general_blocks if "expression" in l][0]
+    assert face_expr == general_expr
+
+    face_has_effects = any("dramatic" in l for l in face_blocks)
+    general_has_effects = any("dramatic" in l for l in general_blocks)
+    assert face_has_effects == general_has_effects
