@@ -6,7 +6,6 @@ This module owns Phase 1 (Jinja2 preprocessing).
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import random
 from pathlib import Path
@@ -14,6 +13,7 @@ from typing import Any
 
 import jinja2
 
+from .selection import seed_derived_index, stable_select
 from .wildcards import load_lines
 
 __all__ = ["create_environment", "render_template"]
@@ -23,29 +23,6 @@ logger = logging.getLogger(__name__)
 # Derived-seed salt so Jinja2 RNG is deterministic but independent
 # from the YAML parser RNG (Q3 decision: option C).
 _JINJA_SEED_SALT: int = 0x6A696E6A  # "jinj" as 4 ASCII bytes
-
-
-def _stable_select(
-    seed: int, items: list[str], weights: list[float] | None = None
-) -> str:
-    """Pick from *items* using SHA-256(seed + joined items) — stable across
-    independent template renders sharing the same seed, regardless of RNG state.
-    """
-    key = f"{seed}:choice:{'|'.join(items)}".encode("utf-8")
-    digest = hashlib.sha256(key).digest()
-
-    if weights is None or all(w == weights[0] for w in weights):
-        idx = int.from_bytes(digest[:8], "big") % len(items)
-        return items[idx]
-
-    hash_float = int.from_bytes(digest[:8], "big") / (1 << 64)
-    total = sum(weights)
-    cumulative = 0.0
-    for i, w in enumerate(weights):
-        cumulative += w / total
-        if hash_float < cumulative:
-            return items[i]
-    return items[-1]
 
 
 def render_template(
@@ -126,7 +103,7 @@ def _make_globals(
         """Pick one item uniformly at random."""
         if not items:
             return ""
-        return _stable_select(seed, list(items))
+        return stable_select(seed, list(items))
 
     def weighted_choice(items_with_weights: list[list[Any]]) -> str:
         """Pick from weighted items.  Each element is ``[value, weight]``."""
@@ -134,7 +111,7 @@ def _make_globals(
             return ""
         values = [str(i[0]) for i in items_with_weights]
         weights = [float(i[1]) for i in items_with_weights]
-        return _stable_select(seed, values, weights)
+        return stable_select(seed, values, weights)
 
     def rand(lo: float = 0.0, hi: float = 1.0) -> float:
         """Random float in *[lo, hi]*, rounded to 2 decimal places."""
@@ -149,10 +126,7 @@ def _make_globals(
         if not lines:
             logger.warning("Wildcard file not found: %s", wildcard_dir / f"{name}.txt")
             return ""
-        key = f"{seed}:{name}".encode("utf-8")
-        digest = hashlib.sha256(key).digest()
-        idx = int.from_bytes(digest[:8], "big") % len(lines)
-        return lines[idx]
+        return lines[seed_derived_index(seed, name, len(lines))]
 
     def break_() -> str:
         """Render a YAML section that produces a CLIP BREAK token in the prompt."""

@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Final, Sequence
 
+from .selection import seed_derived_index, stable_select
 from .wildcards import load_lines
 
 logger = logging.getLogger(__name__)
@@ -19,29 +20,6 @@ class YAMLPromptTemplateParser:
     DEFAULT_WILDCARD_DIR: Final[Path] = Path(__file__).with_name("wildcards")
     MAX_EXPANSION_DEPTH: Final[int] = 64
     MAX_CHOICE_DEPTH: Final[int] = 16
-
-    @staticmethod
-    def _stable_select(
-        seed: int, items: list[str], weights: list[float] | None = None
-    ) -> str:
-        """Pick from *items* using SHA-256(seed + joined items) — stable across
-        independent parser instances sharing the same seed, regardless of RNG state.
-        """
-        key = f"{seed}:choice:{'|'.join(items)}".encode("utf-8")
-        digest = hashlib.sha256(key).digest()
-
-        if weights is None or all(w == weights[0] for w in weights):
-            idx = int.from_bytes(digest[:8], "big") % len(items)
-            return items[idx]
-
-        hash_float = int.from_bytes(digest[:8], "big") / (1 << 64)
-        total = sum(weights)
-        cumulative = 0.0
-        for i, w in enumerate(weights):
-            cumulative += w / total
-            if hash_float < cumulative:
-                return items[i]
-        return items[-1]
 
     def _stable_chance(
         self,
@@ -231,13 +209,10 @@ class YAMLPromptTemplateParser:
         if not isinstance(section, dict) or "chance" not in section:
             return section
 
-        raw_chance = section["chance"]
-        content = {k: v for k, v in section.items() if k != "chance"}
-
-        if not self._evaluate_chance(raw_chance, content):
+        if not self._evaluate_chance(section["chance"], section):
             return None
 
-        return content
+        return {k: v for k, v in section.items() if k != "chance"}
 
     def _extract_section_config(
         self, section: Any, variables: dict[str, str]
@@ -372,7 +347,7 @@ class YAMLPromptTemplateParser:
         if not texts:
             return None
 
-        chosen = self._stable_select(self.seed, texts, weights)
+        chosen = stable_select(self.seed, texts, weights)
         return self.expand_string(template.replace("$value", chosen), variables)
 
     def _normalize_choice_block(self, item: dict) -> dict:
@@ -404,33 +379,38 @@ class YAMLPromptTemplateParser:
         texts: list[str] = []
         weights: list[float] = []
         for opt in options:
-            if isinstance(opt, dict) and self._is_choice_item(opt):
-                # Nested choice block — extract sibling weight, resolve recursively.
-                weight = self._safe_weight(opt.get("weight", 1))
-                clean = {k: v for k, v in opt.items() if k != "weight"}
-                resolved = self._resolve_choice(
-                    self._normalize_choice_block(clean),
-                    variables,
-                    _depth=_depth + 1,
-                )
-                if resolved is None:
-                    continue
-                texts.append(resolved)
-                weights.append(weight)
-            elif isinstance(opt, dict):
-                if "chance" in opt and not self._evaluate_chance(opt["chance"], opt):
-                    continue
-                name, weight = (
-                    opt.get("name", ""),
-                    self._safe_weight(opt.get("weight", 1)),
-                )
-                texts.append(self.expand_string(str(name), variables))
-                weights.append(weight)
-            else:
-                name, weight = opt, 1.0
-                texts.append(self.expand_string(str(name), variables))
-                weights.append(weight)
+            result = self._resolve_option(opt, variables, _depth)
+            if result is not None:
+                texts.append(result[0])
+                weights.append(result[1])
         return texts, weights
+
+    def _resolve_option(
+        self,
+        opt: Any,
+        variables: dict[str, str],
+        _depth: int,
+    ) -> tuple[str, float] | None:
+        if isinstance(opt, dict) and self._is_choice_item(opt):
+            weight = self._safe_weight(opt.get("weight", 1))
+            clean = {k: v for k, v in opt.items() if k != "weight"}
+            resolved = self._resolve_choice(
+                self._normalize_choice_block(clean),
+                variables,
+                _depth=_depth + 1,
+            )
+            if resolved is None:
+                return None
+            return resolved, weight
+
+        if isinstance(opt, dict):
+            if "chance" in opt and not self._evaluate_chance(opt["chance"], opt):
+                return None
+            name = opt.get("name", "")
+            weight = self._safe_weight(opt.get("weight", 1))
+            return self.expand_string(str(name), variables), weight
+
+        return self.expand_string(str(opt), variables), 1.0
 
     def _substitute_variables(self, text: str, variables: dict[str, str]) -> str:
         """Replace ``$name`` references with their values from *variables*."""
@@ -461,7 +441,7 @@ class YAMLPromptTemplateParser:
 
         if not options:
             return ""
-        return self._stable_select(self.seed, options, weights)
+        return stable_select(self.seed, options, weights)
 
     def _substitute_wildcards(self, text: str) -> str:
         """Replace ``__name__`` wildcard tokens with lines from text files."""
@@ -477,7 +457,7 @@ class YAMLPromptTemplateParser:
                     name,
                 )
                 return ""
-            idx = self._seed_derived_index(name, len(candidates))
+            idx = seed_derived_index(self.seed, name, len(candidates))
             return candidates[idx]
 
         return self.WILDCARD_PATTERN.sub(repl, text)
@@ -529,12 +509,6 @@ class YAMLPromptTemplateParser:
 
         self._wildcard_cache[key] = lines
         return lines
-
-    def _seed_derived_index(self, name: str, n: int) -> int:
-        """Return an index derived from the seed and *name*, bypassing RNG state."""
-        key = f"{self.seed}:{name}".encode("utf-8")
-        digest = hashlib.sha256(key).digest()
-        return int.from_bytes(digest[:8], "big") % n
 
     def _resolve_builtin_call(self, text: str) -> str:
         """Evaluate built-in function calls; currently only ``rand(lo, hi)``."""

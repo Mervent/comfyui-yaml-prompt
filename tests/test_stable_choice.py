@@ -1,10 +1,7 @@
 """Tests for stable (SHA-256 keyed) choice selection across independent renders."""
 
 from yaml_prompt.jinja_env import render_template
-from yaml_prompt.parser import YAMLPromptTemplateParser
 from yaml_prompt.pipeline import process_file
-
-from conftest import WILDCARDS_DIR
 
 
 SEED = 42
