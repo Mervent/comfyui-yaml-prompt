@@ -64,10 +64,7 @@ def test_jinja_weighted_choice_stable():
 def test_jinja_weighted_choice_respects_weights():
     raw = "{{ weighted_choice([['heavy', 100], ['light', 1]]) }}"
 
-    heavy_count = sum(
-        1 for s in range(200)
-        if render_template(raw, seed=s) == "heavy"
-    )
+    heavy_count = sum(1 for s in range(200) if render_template(raw, seed=s) == "heavy")
 
     assert heavy_count > 160
 
@@ -111,7 +108,8 @@ def test_brace_weighted_stable(make_parser):
 
 def test_brace_weighted_respects_weights(make_parser):
     heavy_count = sum(
-        1 for s in range(200)
+        1
+        for s in range(200)
         if make_parser(seed=s).expand_string("{100::heavy|1::light}", {}) == "heavy"
     )
 
@@ -150,26 +148,18 @@ def test_choice_block_stable_despite_preceding_rng(make_parser):
 def test_jinja_choice_agrees_with_parser_brace(make_parser):
     items = ("alpha", "beta", "gamma")
 
-    jinja_result = render_template(
-        "{{ choice('alpha', 'beta', 'gamma') }}", seed=SEED
-    )
+    jinja_result = render_template("{{ choice('alpha', 'beta', 'gamma') }}", seed=SEED)
 
-    parser_result = make_parser(seed=SEED).expand_string(
-        "{alpha|beta|gamma}", {}
-    )
+    parser_result = make_parser(seed=SEED).expand_string("{alpha|beta|gamma}", {})
 
     assert jinja_result == parser_result
 
 
 def test_jinja_choice_agrees_with_parser_choice_block(make_parser):
-    jinja_result = render_template(
-        "{{ choice('x', 'y', 'z') }}", seed=SEED
-    )
+    jinja_result = render_template("{{ choice('x', 'y', 'z') }}", seed=SEED)
 
     parser = make_parser(seed=SEED)
-    parser_result = parser._resolve_choice(
-        {"values": ["x", "y", "z"]}, {}
-    )
+    parser_result = parser._resolve_choice({"values": ["x", "y", "z"]}, {})
 
     assert jinja_result == parser_result
 
@@ -273,10 +263,14 @@ def test_choice_block_chance_stable_across_parsers(make_parser):
 
 
 def test_option_chance_stable_across_parsers(make_parser):
-    choice_block = {"choice": {"values": [
-        {"name": "blood", "chance": 0.5},
-        "wounded",
-    ]}}
+    choice_block = {
+        "choice": {
+            "values": [
+                {"name": "blood", "chance": 0.5},
+                "wounded",
+            ]
+        }
+    }
     doc_bare = {"violence": {"values": [choice_block]}}
     doc_with_prefix = {
         "meta": ["filler"],
@@ -295,10 +289,7 @@ def test_option_chance_stable_across_parsers(make_parser):
 def test_chance_distribution_holds(make_parser):
     doc = {"s": {"chance": 0.25, "values": ["content"]}}
 
-    pass_count = sum(
-        1 for s in range(500)
-        if make_parser(seed=s).parse_document(doc)
-    )
+    pass_count = sum(1 for s in range(500) if make_parser(seed=s).parse_document(doc))
 
     assert 75 < pass_count < 175
 
@@ -345,3 +336,185 @@ def test_two_yaml_files_same_choices_and_chances(tmp_path):
     face_has_effects = any("dramatic" in l for l in face_blocks)
     general_has_effects = any("dramatic" in l for l in general_blocks)
     assert face_has_effects == general_has_effects
+
+
+# --- Extended chance: dict form ---
+
+
+# Backwards compatibility: dict {value: X} == plain float X
+
+
+def test_dict_chance_value_only_matches_float_section(make_parser):
+    doc_float = {"s": {"chance": 0.5, "values": ["x"]}}
+    doc_dict = {"s": {"chance": {"value": 0.5}, "values": ["x"]}}
+
+    for s in range(50):
+        float_result = make_parser(seed=s).parse_document(doc_float)
+        dict_result = make_parser(seed=s).parse_document(doc_dict)
+        assert float_result == dict_result, f"seed={s}"
+
+
+def test_dict_chance_value_only_matches_float_item(make_parser):
+    doc_float = {"s": {"values": [{"name": "x", "chance": 0.5}]}}
+    doc_dict = {"s": {"values": [{"name": "x", "chance": {"value": 0.5}}]}}
+
+    for s in range(50):
+        float_result = make_parser(seed=s).parse_document(doc_float)
+        dict_result = make_parser(seed=s).parse_document(doc_dict)
+        assert float_result == dict_result, f"seed={s}"
+
+
+def test_dict_chance_value_only_matches_float_choice(make_parser):
+    doc_float = {"s": {"values": [{"choice": {"chance": 0.5, "values": ["a", "b"]}}]}}
+    doc_dict = {
+        "s": {"values": [{"choice": {"chance": {"value": 0.5}, "values": ["a", "b"]}}]}
+    }
+
+    for s in range(50):
+        float_result = make_parser(seed=s).parse_document(doc_float)
+        dict_result = make_parser(seed=s).parse_document(doc_dict)
+        assert float_result == dict_result, f"seed={s}"
+
+
+def test_dict_chance_value_only_matches_float_option(make_parser):
+    doc_float = {
+        "s": {"values": [{"choice": {"values": [{"name": "a", "chance": 0.5}, "b"]}}]}
+    }
+    doc_dict = {
+        "s": {
+            "values": [
+                {"choice": {"values": [{"name": "a", "chance": {"value": 0.5}}, "b"]}}
+            ]
+        }
+    }
+
+    for s in range(50):
+        float_result = make_parser(seed=s).parse_document(doc_float)
+        dict_result = make_parser(seed=s).parse_document(doc_dict)
+        assert float_result == dict_result, f"seed={s}"
+
+
+# Custom key: links different content to the same coin-flip
+
+
+def test_custom_key_links_different_content(make_parser):
+    doc_a = {
+        "s": {
+            "chance": {"value": 0.5, "key": "lighting"},
+            "values": ["rim light on face"],
+        }
+    }
+    doc_b = {
+        "s": {
+            "chance": {"value": 0.5, "key": "lighting"},
+            "values": ["volumetric full-scene light"],
+        }
+    }
+
+    for s in range(50):
+        a = make_parser(seed=s).parse_document(doc_a)
+        b = make_parser(seed=s).parse_document(doc_b)
+        a_has = len(a) > 0 and any(b2 for b2 in a)
+        b_has = len(b) > 0 and any(b2 for b2 in b)
+        assert a_has == b_has, f"seed={s}"
+
+
+def test_custom_key_stable_across_parsers(make_parser):
+    section = {
+        "chance": {"value": 0.5, "key": "fx_gate"},
+        "values": ["depth-of-field"],
+    }
+    doc_bare = {"effects": section}
+    doc_with_prefix = {
+        "meta": ["ultra-detailed", "masterpiece"],
+        "effects": section,
+    }
+
+    for s in range(50):
+        bare = make_parser(seed=s).parse_document(doc_bare)
+        prefix = make_parser(seed=s).parse_document(doc_with_prefix)
+        bare_has = any("depth" in ln for b in bare for ln in b)
+        prefix_has = any("depth" in ln for b in prefix for ln in b)
+        assert bare_has == prefix_has, f"seed={s}"
+
+
+def test_custom_key_different_keys_can_differ(make_parser):
+    doc_a = {"s": {"chance": {"value": 0.5, "key": "key_alpha"}, "values": ["x"]}}
+    doc_b = {"s": {"chance": {"value": 0.5, "key": "key_beta"}, "values": ["x"]}}
+
+    differ_count = sum(
+        1
+        for s in range(200)
+        if bool(make_parser(seed=s).parse_document(doc_a))
+        != bool(make_parser(seed=s).parse_document(doc_b))
+    )
+
+    assert differ_count > 20
+
+
+# Unstable (truly random, no seed)
+
+
+def test_unstable_chance_varies_across_runs(make_parser):
+    doc = {"s": {"chance": {"value": 0.5, "stable": False}, "values": ["x"]}}
+
+    results = set()
+    for _ in range(50):
+        blocks = make_parser(seed=42).parse_document(doc)
+        has_x = len(blocks) > 0 and any("x" in ln for b in blocks for ln in b)
+        results.add(has_x)
+
+    assert len(results) == 2
+
+
+def test_unstable_chance_distribution(make_parser):
+    doc = {"s": {"chance": {"value": 0.25, "stable": False}, "values": ["x"]}}
+
+    pass_count = sum(1 for _ in range(500) if make_parser(seed=42).parse_document(doc))
+
+    assert 75 < pass_count < 175
+
+
+def test_unstable_chance_1_no_side_effects(make_parser):
+    doc_with = {"s": {"chance": {"value": 1, "stable": False}, "values": ["{a|b|c}"]}}
+    doc_without = {"s": {"values": ["{a|b|c}"]}}
+
+    result_with = make_parser(seed=42).parse_document(doc_with)
+    result_without = make_parser(seed=42).parse_document(doc_without)
+
+    assert result_with == result_without
+
+
+def test_unstable_chance_key_ignored(make_parser):
+    doc = {
+        "s": {
+            "chance": {"value": 0.5, "stable": False, "key": "should_be_ignored"},
+            "values": ["x"],
+        }
+    }
+
+    results = set()
+    for _ in range(50):
+        blocks = make_parser(seed=42).parse_document(doc)
+        has_x = len(blocks) > 0 and any("x" in ln for b in blocks for ln in b)
+        results.add(has_x)
+
+    assert len(results) == 2
+
+
+# Edge cases
+
+
+def test_dict_chance_zero_always_skips(make_parser):
+    doc = {"s": {"chance": {"value": 0}, "values": ["x"]}}
+
+    for s in range(20):
+        assert make_parser(seed=s).parse_document(doc) == []
+
+
+def test_dict_chance_one_always_passes(make_parser):
+    doc = {"s": {"chance": {"value": 1}, "values": ["x"]}}
+
+    for s in range(20):
+        blocks = make_parser(seed=s).parse_document(doc)
+        assert any("x" in ln for b in blocks for ln in b)

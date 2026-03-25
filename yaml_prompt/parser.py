@@ -43,11 +43,93 @@ class YAMLPromptTemplateParser:
                 return items[i]
         return items[-1]
 
-    def _stable_chance(self, chance: float, content: Any) -> bool:
-        key = f"{self.seed}:chance:{content}".encode("utf-8")
-        digest = hashlib.sha256(key).digest()
+    def _stable_chance(
+        self,
+        chance: float,
+        content: Any,
+        *,
+        key: str | None = None,
+    ) -> bool:
+        """Hash-based chance — stable across templates with the same seed.
+
+        When *key* is provided it replaces *content* in the hash, letting
+        different blocks share the same coin-flip via an explicit identifier.
+        """
+        if key is not None:
+            raw_key = f"{self.seed}:chance:{key}".encode("utf-8")
+        else:
+            raw_key = f"{self.seed}:chance:{content}".encode("utf-8")
+        digest = hashlib.sha256(raw_key).digest()
         roll = int.from_bytes(digest[:8], "big") / (1 << 64)
         return roll <= chance
+
+    @staticmethod
+    def _random_chance(chance: float) -> bool:
+        """Truly random chance — ignores seed, varies every render."""
+        return random.random() <= chance
+
+    def _parse_chance(
+        self, raw: float | dict[str, Any]
+    ) -> tuple[float, bool, str | None]:
+        """Parse a chance value (float or dict) into components.
+
+        Supports two forms:
+
+        * ``chance: 0.5`` — plain float, stable, auto-keyed from content.
+        * ``chance: {value: 0.5, stable: false, key: "tag"}`` — dict with
+          optional ``stable`` (default ``True``) and ``key`` fields.
+
+        Parameters
+        ----------
+        raw:
+            Either a numeric value or a dict with ``value``, optional
+            ``stable`` (default ``True``), and optional ``key``.
+
+        Returns
+        -------
+        tuple[float, bool, str | None]
+            ``(probability, is_stable, custom_key)``
+        """
+        if isinstance(raw, dict):
+            value = self._safe_chance(raw.get("value", 1))
+            stable = bool(raw.get("stable", True))
+            key: str | None = None
+            if stable and "key" in raw:
+                key = str(raw["key"])
+            return value, stable, key
+        return self._safe_chance(raw), True, None
+
+    def _evaluate_chance(
+        self, raw_chance: float | dict[str, Any], content: Any
+    ) -> bool:
+        """Evaluate a chance gate (float or dict) against *content*.
+
+        Parameters
+        ----------
+        raw_chance:
+            Raw ``chance`` value from YAML — a number or a dict with
+            ``value``, ``stable``, and ``key`` fields.
+        content:
+            Fallback material for hash-based key derivation when no
+            custom ``key`` is provided.  The ``chance`` key is stripped
+            automatically so that ``chance: 0.5`` and
+            ``chance: {value: 0.5}`` hash identically.
+
+        Returns
+        -------
+        bool
+            ``True`` if the content passes the chance gate.
+        """
+        chance, stable, custom_key = self._parse_chance(raw_chance)
+        if chance >= 1.0:
+            return True
+        if chance <= 0.0:
+            return False
+        if stable:
+            if isinstance(content, dict) and "chance" in content:
+                content = {k: v for k, v in content.items() if k != "chance"}
+            return self._stable_chance(chance, content, key=custom_key)
+        return self._random_chance(chance)
 
     VARIABLE_PATTERN = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
     BRACE_PATTERN = re.compile(r"\{([^{}]+)\}")  # {a|0.5::b|c}
@@ -177,10 +259,10 @@ class YAMLPromptTemplateParser:
         if not isinstance(section, dict) or "chance" not in section:
             return section
 
-        chance = self._safe_chance(section["chance"])
+        raw_chance = section["chance"]
         content = {k: v for k, v in section.items() if k != "chance"}
 
-        if chance < 1.0 and not self._stable_chance(chance, content):
+        if not self._evaluate_chance(raw_chance, content):
             return None
 
         return content
@@ -281,8 +363,7 @@ class YAMLPromptTemplateParser:
             return self._resolve_choice(self._normalize_choice_block(item), variables)
 
         if isinstance(item, dict) and "name" in item:
-            item_chance = self._safe_chance(item.get("chance", 1))
-            if item_chance < 1.0 and not self._stable_chance(item_chance, item):
+            if "chance" in item and not self._evaluate_chance(item["chance"], item):
                 return None
             return self.expand_string(str(item["name"]), variables)
 
@@ -305,8 +386,7 @@ class YAMLPromptTemplateParser:
         _depth: int = 0,
     ) -> str | None:
         """Pick one option from a choice/oneOf block, applying weights and chance."""
-        chance = self._safe_chance(block.get("chance", 1))
-        if chance < 1.0 and not self._stable_chance(chance, block):
+        if "chance" in block and not self._evaluate_chance(block["chance"], block):
             return None
 
         template = block.get("template", "$value")
@@ -366,8 +446,7 @@ class YAMLPromptTemplateParser:
                 texts.append(resolved)
                 weights.append(weight)
             elif isinstance(opt, dict):
-                opt_chance = self._safe_chance(opt.get("chance", 1))
-                if opt_chance < 1.0 and not self._stable_chance(opt_chance, opt):
+                if "chance" in opt and not self._evaluate_chance(opt["chance"], opt):
                     continue
                 name, weight = (
                     opt.get("name", ""),
