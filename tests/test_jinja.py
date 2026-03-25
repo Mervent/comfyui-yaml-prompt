@@ -3,10 +3,11 @@
 import jinja2
 import pytest
 import yaml
-
 from conftest import INCLUDES_DIR, WILDCARDS_DIR
+
 from yaml_prompt.jinja_env import render_template
 from yaml_prompt.parser import YAMLPromptTemplateParser
+from yaml_prompt.pipeline import process_file
 
 
 def test_passthrough_no_jinja():
@@ -112,8 +113,16 @@ def test_include_basic():
 def test_include_conditional():
     raw = "{% if x %}{% include 'part.yaml' %}{% endif %}"
 
-    result_true = render_template(raw, jinja_vars={"x": True}, search_paths=[INCLUDES_DIR])
-    result_false = render_template(raw, jinja_vars={"x": False}, search_paths=[INCLUDES_DIR])
+    result_true = render_template(
+        raw,
+        jinja_vars={"x": True},
+        search_paths=[INCLUDES_DIR],
+    )
+    result_false = render_template(
+        raw,
+        jinja_vars={"x": False},
+        search_paths=[INCLUDES_DIR],
+    )
 
     assert "included content" in result_true
     assert result_false == ""
@@ -262,8 +271,8 @@ def test_derived_seed_independence():
     assert result_with == result_without
 
 
-def test_full_pipeline():
-    raw = (
+def test_full_pipeline(tmp_path):
+    (tmp_path / "template.yaml").write_text(
         "vars:\n"
         "  color: {{ default_color }}\n"
         "{% if add_mood %}\n"
@@ -275,21 +284,16 @@ def test_full_pipeline():
         "  - ultra-detailed\n"
     )
 
-    rendered = render_template(
-        raw, jinja_vars={"default_color": "blue", "add_mood": True}
+    result = process_file(
+        tmp_path / "template.yaml",
+        seed=42,
+        jinja_vars={
+            "default_color": "blue",
+            "add_mood": True,
+        },
     )
-    data = yaml.safe_load(rendered)
 
-    assert data["vars"]["color"] == "blue"
-    assert "mood" in data
-    assert "meta" in data
-
-    parser = YAMLPromptTemplateParser(seed=42)
-    blocks = parser.parse_document(data)
-    flat = [line for block in blocks for line in block]
-
-    assert any("serene" in line or "peaceful" in line for line in flat)
-    assert any("ultra-detailed" in line for line in flat)
+    assert result.prompt == "serene, peaceful\n\nultra-detailed"
 
 
 def test_break_produces_yaml_section():
@@ -301,8 +305,8 @@ def test_break_produces_yaml_section():
     assert result.endswith(": BREAK")
 
 
-def test_break_in_full_pipeline():
-    raw = (
+def test_break_in_full_pipeline(tmp_path):
+    (tmp_path / "template.yaml").write_text(
         "positive:\n"
         "  values:\n"
         "    - beautiful landscape\n"
@@ -312,15 +316,9 @@ def test_break_in_full_pipeline():
         "    - detailed, 8k\n"
     )
 
-    rendered = render_template(raw, seed=42)
-    data = yaml.safe_load(rendered)
-    parser = YAMLPromptTemplateParser(seed=42)
-    blocks = parser.parse_document(data)
-    flat = [line for block in blocks for line in block]
+    result = process_file(tmp_path / "template.yaml", seed=42)
 
-    assert flat[0] == "beautiful landscape"
-    assert flat[1] == "BREAK"
-    assert flat[2] == "detailed, 8k"
+    assert result.prompt == "beautiful landscape\n\nBREAK\n\ndetailed, 8k"
 
 
 def test_break_deterministic():
@@ -332,8 +330,8 @@ def test_break_deterministic():
     assert r1 == r2
 
 
-def test_full_pipeline_conditional_exclude():
-    raw = (
+def test_full_pipeline_conditional_exclude(tmp_path):
+    (tmp_path / "template.yaml").write_text(
         "{% if add_mood %}\n"
         "mood:\n"
         "  - serene\n"
@@ -342,8 +340,34 @@ def test_full_pipeline_conditional_exclude():
         "  - ultra-detailed\n"
     )
 
-    rendered = render_template(raw, jinja_vars={"add_mood": False})
-    data = yaml.safe_load(rendered)
+    result = process_file(
+        tmp_path / "template.yaml",
+        seed=42,
+        jinja_vars={"add_mood": False},
+    )
 
-    assert "mood" not in data
-    assert "meta" in data
+    assert result.prompt == "ultra-detailed"
+
+
+def test_include_override_preserves_position(tmp_path):
+    """Child include overrides a parent section's content but keeps its
+    original position in the prompt — earlier sections stay earlier."""
+    (tmp_path / "child.yaml").write_text(
+        "override_me:\n" "  values:\n" "    - from child\n"
+    )
+    (tmp_path / "parent.yaml").write_text(
+        "override_me:\n"
+        "  values:\n"
+        "    - from parent\n"
+        "middle:\n"
+        "  values:\n"
+        "    - middle content\n"
+        "end:\n"
+        "  values:\n"
+        "    - end content\n"
+        "{% include 'child.yaml' %}\n"
+    )
+
+    result = process_file(tmp_path / "parent.yaml", seed=42)
+
+    assert result.prompt == "from child\n\nmiddle content\n\nend content"
