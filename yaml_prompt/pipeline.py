@@ -26,36 +26,24 @@ class PipelineResult:
     blocks: list[list[str]]
 
 
-def merge_documents(docs: Sequence[dict[str, Any] | None]) -> tuple[dict[str, Any], frozenset[str]]:
+def merge_documents(docs: Sequence[dict[str, Any] | None]) -> dict[str, Any]:
     merged: dict[str, Any] = {}
-    seen_ns: set[str] = set()
 
     for doc in docs:
         if not doc:
             continue
-        ns = doc.get("_namespace")
-        if ns is not None:
-            ns = str(ns)
-            if ns in seen_ns:
-                raise PipelineError(f"Duplicate namespace: {ns!r}")
-            seen_ns.add(ns)
-            for key, value in doc.items():
-                if key == "_namespace":
-                    continue
-                merged[f"{ns}.{key}"] = value
-        else:
-            for key, value in doc.items():
-                if (
-                    key == "vars"
-                    and key in merged
-                    and isinstance(merged[key], dict)
-                    and isinstance(value, dict)
-                ):
-                    merged[key] = {**merged[key], **value}
-                else:
-                    merged[key] = value
+        for key, value in doc.items():
+            if (
+                key == "vars"
+                and key in merged
+                and isinstance(merged[key], dict)
+                and isinstance(value, dict)
+            ):
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
 
-    return merged, frozenset(seen_ns)
+    return merged
 
 
 def process_file(
@@ -93,7 +81,7 @@ def process_file(
 
     try:
         docs = list(yaml.safe_load_all(rendered))
-        yaml_data, namespaces = merge_documents(docs)
+        yaml_data = merge_documents(docs)
     except PipelineError:
         raise
     except yaml.YAMLError as error:
@@ -101,7 +89,7 @@ def process_file(
 
     try:
         parser = YAMLPromptTemplateParser(seed=seed, wildcard_dir=wildcard_dir)
-        blocks = parser.parse_document(yaml_data, namespaces=namespaces)
+        blocks = parser.parse_document(yaml_data)
     except Exception as error:
         raise PipelineError(f"Parser error: {error}") from error
 

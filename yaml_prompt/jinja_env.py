@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 _JINJA_SEED_SALT: int = 0x6A696E6A  # "jinj" as 4 ASCII bytes
 
 
-def _stable_select(seed: int, items: list[str], weights: list[float] | None = None) -> str:
+def _stable_select(
+    seed: int, items: list[str], weights: list[float] | None = None
+) -> str:
     """Pick from *items* using SHA-256(seed + joined items) — stable across
     independent template renders sharing the same seed, regardless of RNG state.
     """
@@ -44,18 +46,6 @@ def _stable_select(seed: int, items: list[str], weights: list[float] | None = No
         if hash_float < cumulative:
             return items[i]
     return items[-1]
-
-
-def _derive_include_seed(original_seed: int, filename: str) -> int:
-    """Derive a deterministic seed for an included template.
-
-    Uses SHA-256 so the child seed depends only on the master seed and filename,
-    making it independent of how many RNG calls the parent consumed before the
-    include.
-    """
-    key = f"{original_seed}:include:{filename}".encode("utf-8")
-    digest = hashlib.sha256(key).digest()
-    return int.from_bytes(digest[:8], "big")
 
 
 def render_template(
@@ -129,10 +119,8 @@ def _make_globals(
     rng: random.Random,
     wildcard_dir: Path | None = None,
     seed: int = 0,
-    original_seed: int | None = None,
 ) -> dict[str, Any]:
     """Build Jinja2 template globals: choice, weighted_choice, rand, wildcard."""
-    _original_seed = original_seed if original_seed is not None else seed
 
     def choice(*items: str) -> str:
         """Pick one item uniformly at random."""
@@ -168,31 +156,8 @@ def _make_globals(
 
     def break_() -> str:
         """Render a YAML section that produces a CLIP BREAK token in the prompt."""
-        tag = format(rng.getrandbits(32), '08x')
+        tag = format(rng.getrandbits(32), "08x")
         return f"_break_{tag}: BREAK"
-
-    @jinja2.pass_context
-    def yaml_include(context: Any, filename: str, namespace: str | None = None) -> str:
-        """Include a YAML file as a namespaced YAML document.
-
-        When a seed is set, the included template gets its own RNG derived from
-        the master seed + filename, so its random values are identical regardless
-        of which parent template includes it.
-        """
-        if namespace is None:
-            namespace = format(rng.getrandbits(24), '06x')
-        env = context.environment
-        template = env.get_template(filename)
-
-        child_seed = _derive_include_seed(_original_seed, filename)
-        child_rng = random.Random(child_seed ^ _JINJA_SEED_SALT)
-        child_globals = _make_globals(
-            child_rng, wildcard_dir, child_seed, _original_seed,
-        )
-        ctx = {**context.get_all(), **child_globals}
-
-        rendered = template.render(ctx)
-        return f"---\n_namespace: {namespace}\n{rendered}\n---"
 
     return {
         "choice": choice,
@@ -200,5 +165,4 @@ def _make_globals(
         "rand": rand,
         "wildcard": wildcard,
         "break": break_,
-        "yaml_include": yaml_include,
     }

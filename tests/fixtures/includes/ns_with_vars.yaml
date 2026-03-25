@@ -1,6 +1,0 @@
-vars:
-  color: red
-  mood: dark
-style:
-  - $color tones
-  - $mood atmosphere

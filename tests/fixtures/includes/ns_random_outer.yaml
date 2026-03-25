@@ -1,3 +1,0 @@
-{{ yaml_include('ns_random.yaml', 'rng_inner') }}
-extra:
-  - {{ choice('alpha', 'beta', 'gamma') }}
