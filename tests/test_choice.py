@@ -1,5 +1,3 @@
-"""Tests for choice/oneOf resolution via _resolve_item and _resolve_choice."""
-
 import pytest
 
 
@@ -20,10 +18,14 @@ def test_choice_weighted(make_parser):
         1
         for seed in range(200)
         if make_parser(seed=seed)._resolve_item(
-            {"choice": {"values": [
-                {"name": "a", "weight": 10},
-                {"name": "b", "weight": 1},
-            ]}},
+            {
+                "choice": {
+                    "values": [
+                        {"name": "a", "weight": 10},
+                        {"name": "b", "weight": 1},
+                    ]
+                }
+            },
             {},
         )
         == "a"
@@ -101,10 +103,14 @@ def test_named_item_without_chance(parser):
 
 def test_nested_choice_basic(parser):
     result = parser._resolve_item(
-        {"choice": {"values": [
-            {"choice": {"values": ["a", "b"]}},
-            {"choice": {"values": ["c", "d"]}},
-        ]}},
+        {
+            "choice": {
+                "values": [
+                    {"choice": {"values": ["a", "b"]}},
+                    {"choice": {"values": ["c", "d"]}},
+                ]
+            }
+        },
         {},
     )
 
@@ -113,10 +119,14 @@ def test_nested_choice_basic(parser):
 
 def test_nested_oneof_alias(parser):
     result = parser._resolve_item(
-        {"oneOf": {"values": [
-            {"oneOf": {"values": ["x", "y"]}},
-            {"oneOf": {"values": ["z"]}},
-        ]}},
+        {
+            "oneOf": {
+                "values": [
+                    {"oneOf": {"values": ["x", "y"]}},
+                    {"oneOf": {"values": ["z"]}},
+                ]
+            }
+        },
         {},
     )
 
@@ -125,11 +135,19 @@ def test_nested_oneof_alias(parser):
 
 def test_nested_choice_three_levels(parser):
     result = parser._resolve_item(
-        {"choice": {"values": [
-            {"choice": {"values": [
-                {"choice": {"values": ["deep_a", "deep_b"]}},
-            ]}},
-        ]}},
+        {
+            "choice": {
+                "values": [
+                    {
+                        "choice": {
+                            "values": [
+                                {"choice": {"values": ["deep_a", "deep_b"]}},
+                            ]
+                        }
+                    },
+                ]
+            }
+        },
         {},
     )
 
@@ -141,10 +159,14 @@ def test_nested_choice_with_weight(make_parser):
         1
         for seed in range(200)
         if make_parser(seed=seed)._resolve_item(
-            {"choice": {"values": [
-                {"choice": {"values": ["a"]}, "weight": 10},
-                {"choice": {"values": ["b"]}, "weight": 1},
-            ]}},
+            {
+                "choice": {
+                    "values": [
+                        {"choice": {"values": ["a"]}, "weight": 10},
+                        {"choice": {"values": ["b"]}, "weight": 1},
+                    ]
+                }
+            },
             {},
         )
         == "a"
@@ -155,10 +177,14 @@ def test_nested_choice_with_weight(make_parser):
 
 def test_nested_choice_inner_chance(parser):
     result = parser._resolve_item(
-        {"choice": {"values": [
-            {"choice": {"chance": 0, "values": ["never"]}},
-            "fallback",
-        ]}},
+        {
+            "choice": {
+                "values": [
+                    {"choice": {"chance": 0, "values": ["never"]}},
+                    "fallback",
+                ]
+            }
+        },
         {},
     )
 
@@ -167,9 +193,13 @@ def test_nested_choice_inner_chance(parser):
 
 def test_nested_choice_inner_template(parser):
     result = parser._resolve_item(
-        {"choice": {"values": [
-            {"choice": {"template": "($value:1.2)", "values": ["fire"]}},
-        ]}},
+        {
+            "choice": {
+                "values": [
+                    {"choice": {"template": "($value:1.2)", "values": ["fire"]}},
+                ]
+            }
+        },
         {},
     )
 
@@ -178,10 +208,14 @@ def test_nested_choice_inner_template(parser):
 
 def test_nested_choice_all_skipped(parser):
     result = parser._resolve_item(
-        {"choice": {"values": [
-            {"choice": {"chance": 0, "values": ["a"]}},
-            {"choice": {"chance": 0, "values": ["b"]}},
-        ]}},
+        {
+            "choice": {
+                "values": [
+                    {"choice": {"chance": 0, "values": ["a"]}},
+                    {"choice": {"chance": 0, "values": ["b"]}},
+                ]
+            }
+        },
         {},
     )
 
@@ -198,10 +232,14 @@ def test_nested_choice_depth_exceeded(parser):
 
 
 def test_nested_choice_deterministic(make_parser):
-    item = {"choice": {"values": [
-        {"choice": {"values": ["a", "b", "c"]}},
-        {"choice": {"values": ["x", "y", "z"]}},
-    ]}}
+    item = {
+        "choice": {
+            "values": [
+                {"choice": {"values": ["a", "b", "c"]}},
+                {"choice": {"values": ["x", "y", "z"]}},
+            ]
+        }
+    }
 
     results = [make_parser(seed=42)._resolve_item(item, {}) for _ in range(10)]
 
@@ -210,9 +248,13 @@ def test_nested_choice_deterministic(make_parser):
 
 def test_nested_choice_with_variables(parser):
     result = parser._resolve_item(
-        {"choice": {"values": [
-            {"choice": {"values": ["$color ball"]}},
-        ]}},
+        {
+            "choice": {
+                "values": [
+                    {"choice": {"values": ["$color ball"]}},
+                ]
+            }
+        },
         {"color": "red"},
     )
 
@@ -223,10 +265,14 @@ def test_nested_choice_in_section(parser):
     section = {
         "values": [
             "intro",
-            {"choice": {"values": [
-                {"choice": {"values": ["inner_a", "inner_b"]}},
-                "flat_option",
-            ]}},
+            {
+                "choice": {
+                    "values": [
+                        {"choice": {"values": ["inner_a", "inner_b"]}},
+                        "flat_option",
+                    ]
+                }
+            },
         ],
     }
 

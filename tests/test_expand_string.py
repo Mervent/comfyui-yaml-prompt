@@ -1,5 +1,3 @@
-"""Tests for expand_string: variable substitution, braces, wildcards."""
-
 import pytest
 
 from yaml_prompt.parser import YAMLPromptTemplateParser

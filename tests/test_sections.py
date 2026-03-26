@@ -1,6 +1,3 @@
-"""Tests for _parse_section: templates, block_templates, chance, vars."""
-
-
 def test_plain_list_section(parser):
     result = parser._parse_section(["a", "b", "c"], {})
 

@@ -1,6 +1,3 @@
-"""Tests for parse_document: full document integration."""
-
-
 def test_empty_document(parser):
     blocks = parser.parse_document({})
 

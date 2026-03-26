@@ -1,5 +1,3 @@
-"""Tests for seed reproducibility guarantees."""
-
 from pathlib import Path
 
 from yaml_prompt.jinja_env import render_template
@@ -39,9 +37,7 @@ def test_same_seed_same_output(make_parser):
 def test_different_seed_different_output(make_parser):
     doc = {"s": {"values": ["{a|b|c|d|e|f|g|h|i|j}"]}}
 
-    results = {
-        str(make_parser(seed=s).parse_document(doc)) for s in range(20)
-    }
+    results = {str(make_parser(seed=s).parse_document(doc)) for s in range(20)}
 
     assert len(results) > 1
 

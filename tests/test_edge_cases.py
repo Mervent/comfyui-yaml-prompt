@@ -1,5 +1,3 @@
-"""Tests for error handling and boundary conditions."""
-
 import pytest
 
 from yaml_prompt.parser import YAMLPromptTemplateParser

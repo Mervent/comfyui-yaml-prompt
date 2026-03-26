@@ -1,5 +1,3 @@
-"""Tests for CLI interface (yaml_prompt.cli)."""
-
 import os
 import subprocess
 import sys
@@ -11,7 +9,8 @@ ROOT = str(Path(__file__).resolve().parent.parent)
 def _run_cli(*args):
     return subprocess.run(
         [sys.executable, "-m", "yaml_prompt.cli", *args],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         env={**os.environ, "PYTHONPATH": ROOT},
     )
 

@@ -1,5 +1,3 @@
-"""Tests for ComfyUI node integration (YAMLPromptLoader)."""
-
 import time
 
 import pytest
@@ -11,6 +9,7 @@ def write_yaml(tmp_path):
         path = tmp_path / name
         path.write_text(content)
         return str(path)
+
     return _write
 
 
@@ -98,8 +97,7 @@ def test_node_lora_extraction(node, write_yaml):
 
 def test_node_lora_multiple(node, write_yaml):
     path = write_yaml(
-        "s1:\n  - photo <lora:real:0.7>\n"
-        "s2:\n  - style <lora:anime:0.5:0.3>\n"
+        "s1:\n  - photo <lora:real:0.7>\n" "s2:\n  - style <lora:anime:0.5:0.3>\n"
     )
 
     result = node.run(path, "", seed=42, jinja_vars="{}")
@@ -109,15 +107,19 @@ def test_node_lora_multiple(node, write_yaml):
 
 
 def test_node_lora_excluded_by_jinja_condition(node, write_yaml):
-    path = write_yaml("s:\n  - base {% if mode == 'anime' %}<lora:anime:0.8>{% endif %}\n")
+    path = write_yaml(
+        "s:\n  - base {% if mode == 'anime' %}<lora:anime:0.8>{% endif %}\n"
+    )
 
-    result = node.run(path, "", seed=42, jinja_vars='{}')
+    result = node.run(path, "", seed=42, jinja_vars="{}")
 
     assert result[1] == []
 
 
 def test_node_lora_included_by_jinja_condition(node, write_yaml):
-    path = write_yaml("s:\n  - base {% if mode == 'anime' %}<lora:anime:0.8>{% endif %}\n")
+    path = write_yaml(
+        "s:\n  - base {% if mode == 'anime' %}<lora:anime:0.8>{% endif %}\n"
+    )
 
     result = node.run(path, "", seed=42, jinja_vars='{"mode": "anime"}')
 
@@ -169,9 +171,7 @@ def test_node_include_from_same_dir(node, tmp_path):
     part_file = tmp_path / "part.yaml"
     part_file.write_text("extra:\n  - included\n")
     yaml_file = tmp_path / "main.yaml"
-    yaml_file.write_text(
-        "meta:\n  - detailed\n{% include 'part.yaml' %}\n"
-    )
+    yaml_file.write_text("meta:\n  - detailed\n{% include 'part.yaml' %}\n")
 
     result = node.run(str(yaml_file), "", seed=42, jinja_vars="{}")
 

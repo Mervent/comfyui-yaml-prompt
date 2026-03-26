@@ -1,51 +1,3 @@
-"""Tests for parser internal helpers — safety net before refactoring."""
-
-from yaml_prompt.parser import YAMLPromptTemplateParser
-
-
-# --- _get_list_values ---
-
-
-def test_get_list_values_with_values_key(parser):
-    result = parser._get_list_values({"values": ["a", "b"]})
-
-    assert result == ["a", "b"]
-
-
-def test_get_list_values_with_options_key(parser):
-    result = parser._get_list_values({"options": ["x"]})
-
-    assert result == ["x"]
-
-
-def test_get_list_values_with_choices_key(parser):
-    result = parser._get_list_values({"choices": [1, 2, 3]})
-
-    assert result == [1, 2, 3]
-
-
-def test_get_list_values_no_match(parser):
-    result = parser._get_list_values({"template": "($value)"})
-
-    assert result is None
-
-
-def test_get_list_values_empty_dict(parser):
-    result = parser._get_list_values({})
-
-    assert result is None
-
-
-def test_get_list_values_priority_order(parser):
-    """First matching key wins (values checked before options)."""
-    result = parser._get_list_values({"values": ["a"], "options": ["b"]})
-
-    assert result == ["a"]
-
-
-# --- _extract_items ---
-
-
 def test_extract_items_dict_with_values(parser):
     result = parser._extract_items({"values": ["a", "b"]})
 
@@ -74,9 +26,6 @@ def test_extract_items_scalar_numeric(parser):
     result = parser._extract_items(42)
 
     assert result == [42]
-
-
-# --- _extract_section_config ---
 
 
 def test_extract_section_config_defaults(parser):
@@ -131,14 +80,12 @@ def test_extract_section_config_inherits_base_vars(parser):
 
 
 def test_extract_section_config_template_expands_vars(parser):
+    """The template string itself undergoes $var expansion."""
     _, item_tpl, _ = parser._extract_section_config(
         {"template": "($value:$w)", "vars": {"w": "1.2"}, "values": ["a"]}, {}
     )
 
     assert item_tpl == "($value:1.2)"
-
-
-# --- _apply_item_template ---
 
 
 def test_apply_item_template_identity(parser):
@@ -157,9 +104,6 @@ def test_apply_item_template_with_variable(parser):
     result = parser._apply_item_template("text", "$prefix $value", {"prefix": "hey"})
 
     assert result == "hey text"
-
-
-# --- _flush_pending ---
 
 
 def test_flush_pending_empty(parser):
@@ -186,9 +130,6 @@ def test_flush_pending_with_template(parser):
     assert result == "(a, b)"
 
 
-# --- _render_items ---
-
-
 def test_render_items_all_strings(parser):
     result = parser._render_items(["a", "b", "c"], {}, "$value")
 
@@ -208,7 +149,7 @@ def test_render_items_single_string(parser):
 
 
 def test_render_items_choice_after_strings(parser):
-    """Choice item after pending strings: result joins into same line."""
+    """Choice result joins into the pending string buffer before flush."""
     items = ["a", "b", {"choice": {"values": ["x"]}}]
 
     result = parser._render_items(items, {}, "$value")
@@ -217,7 +158,7 @@ def test_render_items_choice_after_strings(parser):
 
 
 def test_render_items_named_dict_flushes_pending(parser):
-    """Named dict item causes pending strings to flush as separate line."""
+    """Named dict triggers pending string flush as a separate line."""
     items = ["a", "b", {"name": "special"}]
 
     result = parser._render_items(items, {}, "$value")
@@ -232,7 +173,7 @@ def test_render_items_with_template(parser):
 
 
 def test_render_items_choice_returning_none(parser):
-    """Choice with chance=0 returns None; pending strings still flushed."""
+    """Pending strings still flush even when the choice is skipped by chance."""
     items = ["a", {"choice": {"values": [{"name": "x", "chance": 0}]}}]
 
     result = parser._render_items(items, {}, "$value")
@@ -241,7 +182,6 @@ def test_render_items_choice_returning_none(parser):
 
 
 def test_render_items_named_dict_with_chance_zero(parser):
-    """Named dict with chance=0 is skipped entirely."""
     items = [{"name": "skip", "chance": 0}]
 
     result = parser._render_items(items, {}, "$value")
@@ -253,16 +193,3 @@ def test_render_items_variable_expansion(parser):
     result = parser._render_items(["$color cat"], {"color": "black"}, "$value")
 
     assert result == ["black cat"]
-
-
-# --- _random_chance ---
-
-
-def test_random_chance_always_passes_at_one():
-    assert all(YAMLPromptTemplateParser._random_chance(1.0) for _ in range(100))
-
-
-def test_random_chance_distribution():
-    passes = sum(1 for _ in range(1000) if YAMLPromptTemplateParser._random_chance(0.5))
-
-    assert 350 < passes < 650

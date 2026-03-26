@@ -1,13 +1,8 @@
-"""Tests for stable (SHA-256 keyed) choice selection across independent renders."""
-
 from yaml_prompt.jinja_env import render_template
 from yaml_prompt.pipeline import process_file
 
 
 SEED = 42
-
-
-# --- Jinja choice() stable across independent renders ---
 
 
 def test_jinja_choice_stable_across_renders():
@@ -46,9 +41,6 @@ def test_jinja_choice_no_seed_uses_rng():
     assert len(results) > 1
 
 
-# --- Jinja weighted_choice() stable ---
-
-
 def test_jinja_weighted_choice_stable():
     raw = "{{ weighted_choice([['a', 10], ['b', 1]]) }}"
 
@@ -64,9 +56,6 @@ def test_jinja_weighted_choice_respects_weights():
     heavy_count = sum(1 for s in range(200) if render_template(raw, seed=s) == "heavy")
 
     assert heavy_count > 160
-
-
-# --- Parser brace {a|b|c} stable ---
 
 
 def test_brace_choice_stable_across_parsers(make_parser):
@@ -113,9 +102,6 @@ def test_brace_weighted_respects_weights(make_parser):
     assert heavy_count > 160
 
 
-# --- Parser choice/oneOf blocks stable ---
-
-
 def test_choice_block_stable_across_parsers(make_parser):
     doc = {"s": {"values": [{"choice": {"values": ["x", "y", "z"]}}]}}
 
@@ -139,9 +125,6 @@ def test_choice_block_stable_despite_preceding_rng(make_parser):
     assert bare[0][0] == with_prefix[-1][0]
 
 
-# --- Cross-layer agreement: Jinja choice() == parser {a|b|c} ---
-
-
 def test_jinja_choice_agrees_with_parser_brace(make_parser):
     items = ("alpha", "beta", "gamma")
 
@@ -156,12 +139,9 @@ def test_jinja_choice_agrees_with_parser_choice_block(make_parser):
     jinja_result = render_template("{{ choice('x', 'y', 'z') }}", seed=SEED)
 
     parser = make_parser(seed=SEED)
-    parser_result = parser._resolve_choice({"values": ["x", "y", "z"]}, {})
+    parser_result = parser._choices.resolve({"values": ["x", "y", "z"]}, {})
 
     assert jinja_result == parser_result
-
-
-# --- Same choice in two "separate nodes" simulation ---
 
 
 def test_same_choice_in_independent_templates():
@@ -202,9 +182,6 @@ def test_same_brace_in_independent_parsers(make_parser):
     general_lines = [l for b in general_blocks for l in b if "expression" in l]
 
     assert face_lines[0] == general_lines[0]
-
-
-# --- Stable chance across independent parsers ---
 
 
 def test_section_chance_stable_across_parsers(make_parser):
@@ -291,9 +268,6 @@ def test_chance_distribution_holds(make_parser):
     assert 75 < pass_count < 175
 
 
-# --- Full pipeline: two separate YAML files (two ComfyUI nodes) ---
-
-
 def test_two_yaml_files_same_choices_and_chances(tmp_path):
     face_yaml = tmp_path / "face.yaml"
     face_yaml.write_text(
@@ -333,12 +307,6 @@ def test_two_yaml_files_same_choices_and_chances(tmp_path):
     face_has_effects = any("dramatic" in l for l in face_blocks)
     general_has_effects = any("dramatic" in l for l in general_blocks)
     assert face_has_effects == general_has_effects
-
-
-# --- Extended chance: dict form ---
-
-
-# Backwards compatibility: dict {value: X} == plain float X
 
 
 def test_dict_chance_value_only_matches_float_section(make_parser):
@@ -389,9 +357,6 @@ def test_dict_chance_value_only_matches_float_option(make_parser):
         float_result = make_parser(seed=s).parse_document(doc_float)
         dict_result = make_parser(seed=s).parse_document(doc_dict)
         assert float_result == dict_result, f"seed={s}"
-
-
-# Custom key: links different content to the same coin-flip
 
 
 def test_custom_key_links_different_content(make_parser):
@@ -449,9 +414,6 @@ def test_custom_key_different_keys_can_differ(make_parser):
     assert differ_count > 20
 
 
-# Unstable (truly random, no seed)
-
-
 def test_unstable_chance_varies_across_runs(make_parser):
     doc = {"s": {"chance": {"value": 0.5, "stable": False}, "values": ["x"]}}
 
@@ -497,9 +459,6 @@ def test_unstable_chance_key_ignored(make_parser):
         results.add(has_x)
 
     assert len(results) == 2
-
-
-# Edge cases
 
 
 def test_dict_chance_zero_always_skips(make_parser):

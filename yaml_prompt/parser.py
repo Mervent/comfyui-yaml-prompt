@@ -72,53 +72,6 @@ class YAMLPromptTemplateParser:
         """Expand ``$vars``, brace lists, and wildcards until stable."""
         return self._expander.expand(text, variables)
 
-    # --- Facade methods for backward compatibility with tests ---
-
-    def _resolve_choice(
-        self,
-        block: dict[str, Any],
-        variables: dict[str, str],
-        _depth: int = 0,
-    ) -> str | None:
-        return self._choices.resolve(block, variables, _depth)
-
-    def _is_choice_item(self, item: Any) -> bool:
-        return self._choices.is_choice_item(item)
-
-    def _normalize_choice_block(self, item: dict) -> dict:
-        return self._choices.normalize_block(item)
-
-    def _get_list_values(self, block: dict) -> list | None:
-        return self._choices.get_list_values(block)
-
-    def _evaluate_chance(
-        self, raw_chance: float | dict[str, Any], content: Any
-    ) -> bool:
-        return self._chance.evaluate(raw_chance, content)
-
-    def _apply_chance(self, section: Any) -> Any | None:
-        return self._chance.apply_to_section(section)
-
-    def _parse_chance(
-        self, raw: float | dict[str, Any]
-    ) -> tuple[float, bool, str | None]:
-        return self._chance._parse_chance(raw)
-
-    @staticmethod
-    def _random_chance(chance: float) -> bool:
-        return ChanceEvaluator._random_chance(chance)
-
-    def _stable_chance(
-        self, chance: float, content: Any, *, key: str | None = None
-    ) -> bool:
-        return self._chance._stable_chance(chance, content, key=key)
-
-    def _safe_weight(self, value: Any) -> float:
-        return self._choices._safe_weight(value)
-
-    def _safe_chance(self, value: Any) -> float:
-        return self._chance._safe_chance(value)
-
     def _parse_section(self, section: Any, variables: dict[str, str]) -> list[str]:
         if section is None:
             return []

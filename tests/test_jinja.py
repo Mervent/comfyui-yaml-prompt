@@ -1,5 +1,3 @@
-"""Tests for Jinja2 preprocessing layer (jinja_env.py)."""
-
 import jinja2
 import pytest
 import yaml

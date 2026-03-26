@@ -1,5 +1,3 @@
-"""Tests for lora tag extraction and stripping."""
-
 from yaml_prompt.lora import extract_lora_tags, strip_lora_tags
 
 
