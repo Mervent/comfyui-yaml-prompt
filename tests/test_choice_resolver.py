@@ -98,6 +98,52 @@ def test_resolve_missing_values_raises(choice_resolver):
         choice_resolver.resolve({}, {})
 
 
+def test_resolve_custom_key_deterministic(choice_resolver):
+    block = {"key": "weapon", "values": ["sword", "axe", "spear"]}
+
+    results = [choice_resolver.resolve(block, {}) for _ in range(10)]
+
+    assert all(r == results[0] for r in results)
+
+
+def test_resolve_custom_key_overrides_item_hash(make_parser):
+    """Same key with different items produces same hash-based index."""
+    block_a = {"key": "loadout", "values": ["a1", "a2", "a3"]}
+    block_b = {"key": "loadout", "values": ["b1", "b2", "b3"]}
+
+    for seed in range(20):
+        p = make_parser(seed=seed)
+        idx_a = ["a1", "a2", "a3"].index(p._choices.resolve(block_a, {}))
+        idx_b = ["b1", "b2", "b3"].index(p._choices.resolve(block_b, {}))
+        assert idx_a == idx_b, f"seed={seed}"
+
+
+def test_resolve_without_key_unchanged(make_parser):
+    """No key/stable keys = identical to previous behavior."""
+    block = {"values": ["x", "y", "z"]}
+
+    for seed in range(20):
+        p = make_parser(seed=seed)
+        assert p._choices.resolve(block, {}) in ("x", "y", "z")
+
+
+def test_resolve_unstable_varies(choice_resolver):
+    block = {"stable": False, "values": ["a", "b", "c", "d", "e", "f", "g", "h"]}
+
+    results = {choice_resolver.resolve(block, {}) for _ in range(50)}
+
+    assert len(results) > 1
+
+
+def test_resolve_unstable_key_ignored(choice_resolver):
+    """key is ignored when stable is False, matching chance semantics."""
+    block = {"stable": False, "key": "ignored", "values": ["a", "b", "c", "d", "e"]}
+
+    results = {choice_resolver.resolve(block, {}) for _ in range(50)}
+
+    assert len(results) > 1
+
+
 def test_safe_weight_valid(choice_resolver):
     assert choice_resolver._safe_weight(2.5) == 2.5
     assert choice_resolver._safe_weight("3") == 3.0

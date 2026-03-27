@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from typing import Any, Final, Sequence
 
@@ -57,7 +58,14 @@ class ChoiceResolver:
         if not texts:
             return None
 
-        chosen = stable_select(self.seed, texts, weights)
+        stable = block.get("stable", True)
+        custom_key = block.get("key")
+
+        if stable:
+            chosen = stable_select(self.seed, texts, weights, key=custom_key)
+        else:
+            chosen = self._random_select(texts, weights)
+
         return self._expand(template.replace("$value", chosen), variables)
 
     def is_choice_item(self, item: Any) -> bool:
@@ -140,6 +148,12 @@ class ChoiceResolver:
             return opt.get("name", ""), self._safe_weight(opt.get("weight", 1)), False
 
         return str(opt), 1.0, False
+
+    @staticmethod
+    def _random_select(items: list[str], weights: list[float]) -> str:
+        if all(w == weights[0] for w in weights):
+            return random.choice(items)
+        return random.choices(items, weights=weights, k=1)[0]
 
     def _safe_weight(self, value: Any) -> float:
         try:

@@ -474,3 +474,89 @@ def test_dict_chance_one_always_passes(make_parser):
     for s in range(20):
         blocks = make_parser(seed=s).parse_document(doc)
         assert any("x" in ln for b in blocks for ln in b)
+
+
+def test_choice_key_links_across_sections(make_parser):
+    """Two choice blocks with same key and same-length values pick same index."""
+    doc = {
+        "weapon": {
+            "values": [
+                {"choice": {"key": "loadout", "values": ["sword", "axe", "spear"]}}
+            ]
+        },
+        "armor": {
+            "values": [
+                {"choice": {"key": "loadout", "values": ["light", "medium", "heavy"]}}
+            ]
+        },
+    }
+    mapping = {"sword": "light", "axe": "medium", "spear": "heavy"}
+
+    for s in range(50):
+        blocks = make_parser(seed=s).parse_document(doc)
+        weapon = blocks[0][0]
+        armor = blocks[1][0]
+        assert armor == mapping[weapon], f"seed={s}: {weapon} → {armor}"
+
+
+def test_choice_key_stable_across_parsers(make_parser):
+    block = {"choice": {"key": "fx", "values": ["bloom", "blur", "glow"]}}
+    doc_bare = {"fx": {"values": [block]}}
+    doc_with_prefix = {"meta": ["filler"], "fx": {"values": [block]}}
+
+    for s in range(50):
+        bare = make_parser(seed=s).parse_document(doc_bare)
+        prefixed = make_parser(seed=s).parse_document(doc_with_prefix)
+        assert bare[-1] == prefixed[-1], f"seed={s}"
+
+
+def test_choice_key_different_keys_can_differ(make_parser):
+    doc_a = {
+        "s": {
+            "values": [
+                {"choice": {"key": "alpha", "values": ["a", "b", "c", "d", "e"]}}
+            ]
+        }
+    }
+    doc_b = {
+        "s": {
+            "values": [{"choice": {"key": "beta", "values": ["a", "b", "c", "d", "e"]}}]
+        }
+    }
+
+    differ = sum(
+        1
+        for s in range(200)
+        if make_parser(seed=s).parse_document(doc_a)
+        != make_parser(seed=s).parse_document(doc_b)
+    )
+
+    assert differ > 20
+
+
+def test_choice_unstable_varies_across_runs(make_parser):
+    doc = {
+        "s": {
+            "values": [
+                {"choice": {"stable": False, "values": ["a", "b", "c", "d", "e"]}}
+            ]
+        }
+    }
+
+    results = set()
+    for _ in range(50):
+        blocks = make_parser(seed=42).parse_document(doc)
+        results.add(blocks[0][0])
+
+    assert len(results) > 1
+
+
+def test_choice_unstable_no_side_effects(make_parser):
+    """stable: true explicitly should behave identically to no key at all."""
+    doc_with = {"s": {"values": [{"choice": {"stable": True, "values": ["{a|b|c}"]}}]}}
+    doc_without = {"s": {"values": [{"choice": {"values": ["{a|b|c}"]}}]}}
+
+    for s in range(20):
+        assert make_parser(seed=s).parse_document(doc_with) == make_parser(
+            seed=s
+        ).parse_document(doc_without), f"seed={s}"

@@ -14,7 +14,11 @@ __all__ = ["stable_select", "seed_derived_index"]
 
 
 def stable_select(
-    seed: int, items: list[str], weights: list[float] | None = None
+    seed: int,
+    items: list[str],
+    weights: list[float] | None = None,
+    *,
+    key: str | None = None,
 ) -> str:
     """Pick from *items* using SHA-256(seed + joined items).
 
@@ -30,14 +34,21 @@ def stable_select(
     weights:
         Optional per-item weights.  When all weights are equal (or
         ``None``), a uniform selection is used.
+    key:
+        Optional custom hash key.  When provided, replaces the default
+        ``|``-joined items in the hash, enabling correlated selections
+        across blocks with different item lists.
 
     Returns
     -------
     str
         The selected item.
     """
-    key = f"{seed}:choice:{'|'.join(items)}".encode("utf-8")
-    digest = hashlib.sha256(key).digest()
+    if key is not None:
+        hash_input = f"{seed}:choice:{key}".encode("utf-8")
+    else:
+        hash_input = f"{seed}:choice:{'|'.join(items)}".encode("utf-8")
+    digest = hashlib.sha256(hash_input).digest()
 
     if weights is None or all(w == weights[0] for w in weights):
         idx = int.from_bytes(digest[:8], "big") % len(items)
