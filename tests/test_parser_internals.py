@@ -29,17 +29,18 @@ def test_extract_items_scalar_numeric(parser):
 
 
 def test_extract_section_config_defaults(parser):
-    variables, item_tpl, block_tpl = parser._extract_section_config(
+    variables, item_tpl, block_tpl, separator = parser._extract_section_config(
         {"values": ["a"]}, {}
     )
 
     assert item_tpl == "$value"
     assert block_tpl is None
+    assert separator == ", "
     assert variables == {}
 
 
 def test_extract_section_config_custom_template(parser):
-    _, item_tpl, block_tpl = parser._extract_section_config(
+    _, item_tpl, block_tpl, _ = parser._extract_section_config(
         {"template": "($value)", "values": ["a"]}, {}
     )
 
@@ -48,7 +49,7 @@ def test_extract_section_config_custom_template(parser):
 
 
 def test_extract_section_config_block_template(parser):
-    _, item_tpl, block_tpl = parser._extract_section_config(
+    _, item_tpl, block_tpl, _ = parser._extract_section_config(
         {"block_template": "[$value]", "values": ["a"]}, {}
     )
 
@@ -57,7 +58,7 @@ def test_extract_section_config_block_template(parser):
 
 
 def test_extract_section_config_local_vars(parser):
-    variables, _, _ = parser._extract_section_config(
+    variables, _, _, _ = parser._extract_section_config(
         {"vars": {"x": "hello"}, "values": ["$x"]}, {}
     )
 
@@ -65,14 +66,15 @@ def test_extract_section_config_local_vars(parser):
 
 
 def test_extract_section_config_non_dict(parser):
-    _, item_tpl, block_tpl = parser._extract_section_config("text", {})
+    _, item_tpl, block_tpl, separator = parser._extract_section_config("text", {})
 
     assert item_tpl == "$value"
     assert block_tpl is None
+    assert separator == ", "
 
 
 def test_extract_section_config_inherits_base_vars(parser):
-    variables, _, _ = parser._extract_section_config(
+    variables, _, _, _ = parser._extract_section_config(
         {"values": ["a"]}, {"existing": "var"}
     )
 
@@ -81,7 +83,7 @@ def test_extract_section_config_inherits_base_vars(parser):
 
 def test_extract_section_config_template_expands_vars(parser):
     """The template string itself undergoes $var expansion."""
-    _, item_tpl, _ = parser._extract_section_config(
+    _, item_tpl, _, _ = parser._extract_section_config(
         {"template": "($value:$w)", "vars": {"w": "1.2"}, "values": ["a"]}, {}
     )
 
@@ -193,3 +195,39 @@ def test_render_items_variable_expansion(parser):
     result = parser._render_items(["$color cat"], {"color": "black"}, "$value")
 
     assert result == ["black cat"]
+
+
+def test_extract_section_config_custom_separator(parser):
+    _, _, _, separator = parser._extract_section_config(
+        {"separator": " | ", "values": ["a"]}, {}
+    )
+
+    assert separator == " | "
+
+
+def test_extract_section_config_separator_literal(parser):
+    _, _, _, separator = parser._extract_section_config(
+        {"separator": " . ", "values": ["a"]}, {}
+    )
+
+    assert separator == " . "
+
+
+def test_flush_pending_custom_separator(parser):
+    result = parser._flush_pending(["a", "b", "c"], "$value", {}, " | ")
+
+    assert result == "a | b | c"
+
+
+def test_render_items_custom_separator(parser):
+    result = parser._render_items(["a", "b", "c"], {}, "$value", " | ")
+
+    assert result == ["a | b | c"]
+
+
+def test_render_items_choice_with_custom_separator(parser):
+    items = ["a", "b", {"choice": {"values": ["x"]}}]
+
+    result = parser._render_items(items, {}, "$value", " | ")
+
+    assert result == ["a | b | x"]

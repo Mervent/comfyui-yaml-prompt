@@ -80,7 +80,7 @@ class YAMLPromptTemplateParser:
         if section is None:
             return []
 
-        variables, item_tpl, block_tpl = self._extract_section_config(
+        variables, item_tpl, block_tpl, separator = self._extract_section_config(
             section, variables
         )
         items = self._extract_items(section)
@@ -89,29 +89,31 @@ class YAMLPromptTemplateParser:
             and item_tpl == "$value"
             and block_tpl is None
         )
-        rendered_lines = self._render_items(items, variables, item_tpl)
+        rendered_lines = self._render_items(items, variables, item_tpl, separator)
         return self._apply_templates(
-            is_simple_plain, rendered_lines, block_tpl, variables
+            is_simple_plain, rendered_lines, block_tpl, variables, separator
         )
 
     def _extract_section_config(
         self, section: Any, variables: dict[str, str]
-    ) -> tuple[dict[str, str], str, str | None]:
+    ) -> tuple[dict[str, str], str, str | None, str]:
         if isinstance(section, dict) and "vars" in section:
             variables = self._collect_vars(section["vars"], variables)
 
         if isinstance(section, dict):
             raw_item_tpl = section.get("template", "$value")
             raw_block_tpl = section.get("block_template")
+            raw_separator = section.get("separator", ", ")
         else:
-            raw_item_tpl, raw_block_tpl = "$value", None
+            raw_item_tpl, raw_block_tpl, raw_separator = "$value", None, ", "
 
         item_tpl = self._expander.expand(raw_item_tpl, variables)
         block_tpl = (
             self._expander.expand(raw_block_tpl, variables) if raw_block_tpl else None
         )
+        separator = str(raw_separator)
 
-        return variables, item_tpl, block_tpl
+        return variables, item_tpl, block_tpl, separator
 
     def _extract_items(self, section: Any) -> list:
         if isinstance(section, dict):
@@ -122,7 +124,11 @@ class YAMLPromptTemplateParser:
         return [section]
 
     def _render_items(
-        self, items: list, variables: dict[str, str], item_tpl: str
+        self,
+        items: list,
+        variables: dict[str, str],
+        item_tpl: str,
+        separator: str = ", ",
     ) -> list[str]:
         rendered: list[str] = []
         pending: list[str] = []
@@ -137,12 +143,14 @@ class YAMLPromptTemplateParser:
                 if result is not None:
                     pending.append(result)
                 rendered.append(
-                    self._apply_item_template(", ".join(pending), item_tpl, variables)
+                    self._apply_item_template(
+                        separator.join(pending), item_tpl, variables
+                    )
                 )
                 pending = []
                 continue
 
-            flushed = self._flush_pending(pending, item_tpl, variables)
+            flushed = self._flush_pending(pending, item_tpl, variables, separator)
             if flushed is not None:
                 rendered.append(flushed)
             pending = []
@@ -151,7 +159,7 @@ class YAMLPromptTemplateParser:
             if result is not None:
                 rendered.append(self._apply_item_template(result, item_tpl, variables))
 
-        flushed = self._flush_pending(pending, item_tpl, variables)
+        flushed = self._flush_pending(pending, item_tpl, variables, separator)
         if flushed is not None:
             rendered.append(flushed)
 
@@ -163,14 +171,15 @@ class YAMLPromptTemplateParser:
         rendered_lines: list[str],
         block_tpl: str | None,
         variables: dict[str, str],
+        separator: str = ", ",
     ) -> list[str]:
         if is_simple_plain:
-            return [", ".join(rendered_lines)]
+            return [separator.join(rendered_lines)]
 
         if block_tpl is not None:
             return [
                 self._expander.expand(
-                    block_tpl.replace("$value", ", ".join(rendered_lines)),
+                    block_tpl.replace("$value", separator.join(rendered_lines)),
                     variables,
                 )
             ]
@@ -211,10 +220,11 @@ class YAMLPromptTemplateParser:
         pending: list[str],
         item_tpl: str,
         variables: dict[str, str],
+        separator: str = ", ",
     ) -> str | None:
         if not pending:
             return None
-        return self._apply_item_template(", ".join(pending), item_tpl, variables)
+        return self._apply_item_template(separator.join(pending), item_tpl, variables)
 
     def _resolve_builtin_call(self, text: str) -> str:
         match = self.FUNCTION_PATTERN.match(text)

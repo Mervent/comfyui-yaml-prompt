@@ -128,3 +128,81 @@ def test_strings_flushed_before_named_item(parser):
     result = parser._parse_section(section, {})
 
     assert result == ["a, b", "special"]
+
+
+def test_section_custom_separator(parser):
+    section = {"separator": " | ", "values": ["a", "b", "c"]}
+
+    result = parser._parse_section(section, {})
+
+    assert result == ["a | b | c"]
+
+
+def test_section_separator_space(parser):
+    section = {"separator": " ", "values": ["4k", "hdr", "detailed"]}
+
+    result = parser._parse_section(section, {})
+
+    assert result == ["4k hdr detailed"]
+
+
+def test_section_separator_with_template(parser):
+    section = {"separator": " | ", "template": "($value)", "values": ["a", "b"]}
+
+    result = parser._parse_section(section, {})
+
+    assert result == ["(a | b)"]
+
+
+def test_section_separator_with_block_template(parser):
+    section = {
+        "separator": " | ",
+        "block_template": "[$value]",
+        "values": ["a", "b"],
+    }
+
+    result = parser._parse_section(section, {})
+
+    assert result == ["[a | b]"]
+
+
+def test_section_separator_default_unchanged(parser):
+    section = {"values": ["a", "b", "c"]}
+
+    result = parser._parse_section(section, {})
+
+    assert result == ["a, b, c"]
+
+
+def test_section_separator_empty_string(parser):
+    section = {"separator": "", "values": ["a", "b", "c"]}
+
+    result = parser._parse_section(section, {})
+
+    assert result == ["abc"]
+
+
+def test_section_separator_newline(parser):
+    section = {"separator": "\n", "values": ["line1", "line2"]}
+
+    result = parser._parse_section(section, {})
+
+    assert result == ["line1\nline2"]
+
+
+def test_section_separator_plain_list_unaffected(parser):
+    result = parser._parse_section(["a", "b", "c"], {})
+
+    assert result == ["a, b, c"]
+
+
+def test_section_separator_in_full_document(parser):
+    doc = {
+        "tags": {"separator": " ", "values": ["4k", "hdr"]},
+        "style": {"values": ["painterly", "soft"]},
+    }
+
+    blocks = parser.parse_document(doc)
+
+    assert blocks[0] == ["4k hdr"]
+    assert blocks[1] == ["painterly, soft"]
