@@ -1,3 +1,5 @@
+import random
+
 import pytest
 
 
@@ -140,6 +142,17 @@ def test_resolve_unstable_key_ignored(choice_resolver):
     block = {"stable": False, "key": "ignored", "values": ["a", "b", "c", "d", "e"]}
 
     results = {choice_resolver.resolve(block, {}) for _ in range(50)}
+
+    assert len(results) > 1
+
+
+def test_resolve_unstable_ignores_global_random_seed(choice_resolver):
+    block = {"stable": False, "values": ["a", "b", "c", "d", "e", "f", "g", "h"]}
+
+    results = set()
+    for _ in range(50):
+        random.seed(42)
+        results.add(choice_resolver.resolve(block, {}))
 
     assert len(results) > 1
 

@@ -33,9 +33,12 @@ class YAMLPromptTemplateParser:
             wdir = self.DEFAULT_WILDCARD_DIR
         self.wildcard_dir = wdir
 
-        self._chance = ChanceEvaluator(seed)
+        unstable_rng = random.Random()
+        self._chance = ChanceEvaluator(seed, rng=unstable_rng)
         self._expander = StringExpander(seed, wdir)
-        self._choices = ChoiceResolver(seed, self._chance, self._expander.expand)
+        self._choices = ChoiceResolver(
+            seed, self._chance, self._expander.expand, rng=unstable_rng
+        )
 
     def parse_document(self, doc: dict[str, Any]) -> list[list[str]]:
         """Flatten *doc* into blocks of prompt lines.

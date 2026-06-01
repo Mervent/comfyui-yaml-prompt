@@ -1,14 +1,12 @@
 import pytest
 
-from yaml_prompt.chance import ChanceEvaluator
+
+def test_random_chance_always_passes_at_one(chance_evaluator):
+    assert all(chance_evaluator._random_chance(1.0) for _ in range(100))
 
 
-def test_random_chance_always_passes_at_one():
-    assert all(ChanceEvaluator._random_chance(1.0) for _ in range(100))
-
-
-def test_random_chance_distribution():
-    passes = sum(1 for _ in range(1000) if ChanceEvaluator._random_chance(0.5))
+def test_random_chance_distribution(chance_evaluator):
+    passes = sum(1 for _ in range(1000) if chance_evaluator._random_chance(0.5))
 
     assert 350 < passes < 650
 

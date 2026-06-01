@@ -11,16 +11,21 @@ class ChanceEvaluator:
     """Evaluate probability gates for prompt sections and items.
 
     Uses SHA-256 hashing for stable (seed-deterministic) chance evaluation,
-    or stdlib ``random`` for truly random evaluation.
+    or a dedicated ``random.Random`` instance for truly random evaluation.
 
     Parameters
     ----------
     seed:
         Master seed for deterministic hashing.
+    rng:
+        RNG for unstable (``stable: false``) rolls.  Defaults to an
+        OS-entropy-seeded instance so results are immune to external
+        ``random.seed()`` calls (e.g. ComfyUI global seeding).
     """
 
-    def __init__(self, seed: int) -> None:
+    def __init__(self, seed: int, *, rng: random.Random | None = None) -> None:
         self.seed = seed
+        self._rng = rng or random.Random()
 
     def evaluate(self, raw_chance: float | dict[str, Any], content: Any) -> bool:
         """Evaluate a chance gate (float or dict) against *content*.
@@ -82,10 +87,8 @@ class ChanceEvaluator:
         roll = int.from_bytes(digest[:8], "big") / (1 << 64)
         return roll <= chance
 
-    @staticmethod
-    def _random_chance(chance: float) -> bool:
-        """Truly random chance — ignores seed, varies every render."""
-        return random.random() <= chance
+    def _random_chance(self, chance: float) -> bool:
+        return self._rng.random() <= chance
 
     def _parse_chance(
         self, raw: float | dict[str, Any]

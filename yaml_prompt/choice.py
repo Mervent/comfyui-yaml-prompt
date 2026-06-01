@@ -32,10 +32,13 @@ class ChoiceResolver:
         seed: int,
         chance: ChanceEvaluator,
         expand_fn: Callable[[str, dict[str, str]], str],
+        *,
+        rng: random.Random | None = None,
     ) -> None:
         self.seed = seed
         self._chance = chance
         self._expand = expand_fn
+        self._rng = rng or random.Random()
 
     def resolve(
         self,
@@ -149,11 +152,10 @@ class ChoiceResolver:
 
         return str(opt), 1.0, False
 
-    @staticmethod
-    def _random_select(items: list[str], weights: list[float]) -> str:
+    def _random_select(self, items: list[str], weights: list[float]) -> str:
         if all(w == weights[0] for w in weights):
-            return random.choice(items)
-        return random.choices(items, weights=weights, k=1)[0]
+            return self._rng.choice(items)
+        return self._rng.choices(items, weights=weights, k=1)[0]
 
     def _safe_weight(self, value: Any) -> float:
         try:

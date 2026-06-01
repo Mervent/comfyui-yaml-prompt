@@ -1,3 +1,5 @@
+import random
+
 from yaml_prompt.jinja_env import render_template
 from yaml_prompt.pipeline import process_file
 
@@ -560,3 +562,34 @@ def test_choice_unstable_no_side_effects(make_parser):
         assert make_parser(seed=s).parse_document(doc_with) == make_parser(
             seed=s
         ).parse_document(doc_without), f"seed={s}"
+
+
+def test_choice_unstable_ignores_global_random_seed(make_parser):
+    doc = {
+        "s": {
+            "values": [
+                {"choice": {"stable": False, "values": ["a", "b", "c", "d", "e"]}}
+            ]
+        }
+    }
+
+    results = set()
+    for _ in range(50):
+        random.seed(42)
+        blocks = make_parser(seed=42).parse_document(doc)
+        results.add(blocks[0][0])
+
+    assert len(results) > 1
+
+
+def test_chance_unstable_ignores_global_random_seed(make_parser):
+    doc = {"s": {"chance": {"value": 0.5, "stable": False}, "values": ["x"]}}
+
+    results = set()
+    for _ in range(50):
+        random.seed(42)
+        blocks = make_parser(seed=42).parse_document(doc)
+        has_x = len(blocks) > 0 and any("x" in ln for b in blocks for ln in b)
+        results.add(has_x)
+
+    assert len(results) == 2
