@@ -75,12 +75,12 @@ def test_mixed_strings_and_choices(parser):
 
     result = parser._parse_section(section, {})
 
-    assert len(result) == 2
-    first_part = result[0]
-    assert first_part.startswith("a, b, ")
-    tail = first_part.removeprefix("a, b, ")
-    assert tail in ("x", "y")
-    assert result[1] == "c"
+    assert len(result) == 1
+    parts = result[0].split(", ")
+    assert parts[0] == "a"
+    assert parts[1] == "b"
+    assert parts[2] in ("x", "y")
+    assert parts[3] == "c"
 
 
 def test_section_dict_without_values_key(parser):
@@ -127,7 +127,7 @@ def test_strings_flushed_before_named_item(parser):
 
     result = parser._parse_section(section, {})
 
-    assert result == ["a, b", "special"]
+    assert result == ["a, b, special"]
 
 
 def test_section_custom_separator(parser):
@@ -206,3 +206,35 @@ def test_section_separator_in_full_document(parser):
 
     assert blocks[0] == ["4k hdr"]
     assert blocks[1] == ["painterly, soft"]
+
+
+def test_choice_items_joined_by_separator(parser):
+    doc = {
+        "s": {
+            "values": [
+                "a",
+                {"choice": {"values": ["x", "y"]}},
+                "b",
+            ]
+        }
+    }
+
+    blocks = parser.parse_document(doc)
+
+    assert len(blocks) == 1
+    assert ", " in blocks[0][0]
+
+
+def test_sections_with_choices_still_separate_blocks(parser):
+    doc = {
+        "s1": {
+            "values": [{"choice": {"values": ["a", "b"]}}]
+        },
+        "s2": {
+            "values": [{"choice": {"values": ["c", "d"]}}]
+        },
+    }
+
+    blocks = parser.parse_document(doc)
+
+    assert len(blocks) == 2

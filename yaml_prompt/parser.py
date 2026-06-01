@@ -176,6 +176,9 @@ class YAMLPromptTemplateParser:
         variables: dict[str, str],
         separator: str = ", ",
     ) -> list[str]:
+        if not rendered_lines:
+            return []
+
         if is_simple_plain:
             return [separator.join(rendered_lines)]
 
@@ -187,7 +190,7 @@ class YAMLPromptTemplateParser:
                 )
             ]
 
-        return rendered_lines
+        return [separator.join(rendered_lines)]
 
     def _resolve_item(self, item: Any, variables: dict[str, str]) -> str | None:
         if self._choices.is_choice_item(item):

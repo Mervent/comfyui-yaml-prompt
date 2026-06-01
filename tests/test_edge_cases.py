@@ -29,9 +29,7 @@ def test_chance_above_1(parser):
 def test_empty_values_list(parser):
     result = parser._parse_section({"values": []}, {})
 
-    # Empty values + simple_plain path produces one empty string (vacuous join).
-    # Filtered out by parse_document's `if lines:` check in practice.
-    assert result == [""]
+    assert result == []
 
 
 def test_numeric_section_value(parser):
