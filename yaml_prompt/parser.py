@@ -141,7 +141,10 @@ class YAMLPromptTemplateParser:
                 pending.append(self._expander.expand(item, variables))
                 continue
 
-            if pending and self._choices.is_choice_item(item):
+            if pending and (
+                self._choices.is_choice_item(item)
+                or self._choices.is_chain_item(item)
+            ):
                 result = self._resolve_item(item, variables)
                 if result is not None:
                     pending.append(result)
@@ -193,6 +196,11 @@ class YAMLPromptTemplateParser:
         return [separator.join(rendered_lines)]
 
     def _resolve_item(self, item: Any, variables: dict[str, str]) -> str | None:
+        if self._choices.is_chain_item(item):
+            return self._choices.resolve_chain(
+                self._choices.normalize_block(item), variables
+            )
+
         if self._choices.is_choice_item(item):
             return self._choices.resolve(self._choices.normalize_block(item), variables)
 
