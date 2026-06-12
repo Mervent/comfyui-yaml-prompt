@@ -26,6 +26,7 @@ class ChoiceResolver:
     VALUES_KEYS: Final[Sequence[str]] = ("values", "options", "choices")
     CHOICE_KEYS: Final[Sequence[str]] = ("choice", "oneOf")
     CHAIN_KEY: Final[str] = "chain"
+    GROUP_KEY: Final[str] = "group"
     MAX_CHOICE_DEPTH: Final[int] = 16
 
     def __init__(
@@ -77,25 +78,30 @@ class ChoiceResolver:
         block: dict[str, Any],
         variables: dict[str, str],
         _depth: int = 0,
+        *,
+        skip_failed: bool = False,
     ) -> str | None:
-        """Process chain items sequentially; break on first chance failure.
+        """Process chain/group items sequentially, joining their results.
 
         Parameters
         ----------
         block : dict[str, Any]
-            Normalized chain block (must contain a ``values``/``options``/
-            ``choices`` list).
+            Normalized chain/group block (must contain a ``values``/
+            ``options``/``choices`` list).
         variables : dict[str, str]
             Current variable bindings for ``$var`` expansion.
         _depth : int
             Recursion guard shared with ``resolve()``.
+        skip_failed : bool
+            When ``False`` (``chain``), stop at the first item that fails its
+            chance gate. When ``True`` (``group``), skip failed items and keep
+            going so each item is gated independently.
 
         Returns
         -------
         str | None
-            Concatenated result of all items up to the first chance failure,
-            or ``None`` if the block-level chance gate fails or the very
-            first item fails.
+            Joined result of the surviving items, or ``None`` if the
+            block-level chance gate fails or no item survives.
         """
         if _depth > self.MAX_CHOICE_DEPTH:
             raise ValueError(
@@ -106,7 +112,7 @@ class ChoiceResolver:
         if not self._chance.check(block):
             return None
 
-        separator = str(block.get("separator", " "))
+        separator = str(block.get("separator", ", " if skip_failed else " "))
         template = block.get("template", "$value")
         options = self.get_list_values(block)
         if options is None:
@@ -116,6 +122,8 @@ class ChoiceResolver:
         for item in options:
             resolved = self._resolve_chain_item(item, variables, _depth)
             if resolved is None:
+                if skip_failed:
+                    continue
                 break
             accumulated.append(resolved)
 
@@ -133,14 +141,14 @@ class ChoiceResolver:
         variables: dict[str, str],
         _depth: int,
     ) -> str | None:
-        if isinstance(item, dict) and self.CHAIN_KEY in item:
+        if isinstance(item, dict) and self.GROUP_KEY in item:
             return self.resolve_chain(
-                self.normalize_block(item), variables, _depth + 1
+                self.normalize_block(item), variables, _depth + 1, skip_failed=True
             )
+        if isinstance(item, dict) and self.CHAIN_KEY in item:
+            return self.resolve_chain(self.normalize_block(item), variables, _depth + 1)
         if self.is_choice_item(item):
-            return self.resolve(
-                self.normalize_block(item), variables, _depth + 1
-            )
+            return self.resolve(self.normalize_block(item), variables, _depth + 1)
         if isinstance(item, dict) and "name" in item:
             if not self._chance.check(item):
                 return None
@@ -153,6 +161,11 @@ class ChoiceResolver:
         if not isinstance(item, dict):
             return False
         return self.CHAIN_KEY in item
+
+    def is_group_item(self, item: Any) -> bool:
+        if not isinstance(item, dict):
+            return False
+        return self.GROUP_KEY in item
 
     def is_choice_item(self, item: Any) -> bool:
         if not isinstance(item, dict):
@@ -211,7 +224,14 @@ class ChoiceResolver:
         content, weight, is_block = parsed
 
         if is_block:
-            if isinstance(content, dict) and self.CHAIN_KEY in content:
+            if isinstance(content, dict) and self.GROUP_KEY in content:
+                resolved = self.resolve_chain(
+                    self.normalize_block(content),
+                    variables,
+                    _depth=_depth + 1,
+                    skip_failed=True,
+                )
+            elif isinstance(content, dict) and self.CHAIN_KEY in content:
                 resolved = self.resolve_chain(
                     self.normalize_block(content),
                     variables,
@@ -231,7 +251,9 @@ class ChoiceResolver:
 
     def _parse_option(self, opt: Any) -> tuple[Any, float, bool] | None:
         if isinstance(opt, dict) and (
-            self.is_choice_item(opt) or self.is_chain_item(opt)
+            self.is_choice_item(opt)
+            or self.is_chain_item(opt)
+            or self.is_group_item(opt)
         ):
             weight = self._safe_weight(opt.get("weight", 1))
             clean = {k: v for k, v in opt.items() if k != "weight"}
