@@ -593,3 +593,76 @@ def test_chance_unstable_ignores_global_random_seed(make_parser):
         results.add(has_x)
 
     assert len(results) == 2
+
+
+def test_section_chance_flat_stable_false_varies(make_parser):
+    doc = {"s": {"chance": 0.5, "stable": False, "values": ["x"]}}
+
+    results = set()
+    for _ in range(50):
+        blocks = make_parser(seed=42).parse_document(doc)
+        has_x = len(blocks) > 0 and any("x" in ln for b in blocks for ln in b)
+        results.add(has_x)
+
+    assert len(results) == 2
+
+
+def test_section_chance_flat_stable_false_distribution(make_parser):
+    doc = {"s": {"chance": 0.25, "stable": False, "values": ["x"]}}
+
+    pass_count = sum(1 for _ in range(500) if make_parser(seed=42).parse_document(doc))
+
+    assert 75 < pass_count < 175
+
+
+def test_section_chance_flat_stable_false_matches_dict_form(make_parser):
+    doc_flat = {"s": {"chance": 0.5, "stable": False, "values": ["x"]}}
+    doc_dict = {"s": {"chance": {"value": 0.5, "stable": False}, "values": ["x"]}}
+
+    flat_results = set()
+    dict_results = set()
+    for _ in range(50):
+        flat_blocks = make_parser(seed=42).parse_document(doc_flat)
+        dict_blocks = make_parser(seed=42).parse_document(doc_dict)
+        flat_results.add(bool(flat_blocks))
+        dict_results.add(bool(dict_blocks))
+
+    assert len(flat_results) == 2
+    assert len(dict_results) == 2
+
+
+def test_item_chance_flat_stable_false_varies(make_parser):
+    doc = {"s": {"values": [{"name": "x", "chance": 0.5, "stable": False}]}}
+
+    results = set()
+    for _ in range(50):
+        blocks = make_parser(seed=42).parse_document(doc)
+        has_x = len(blocks) > 0 and any("x" in ln for b in blocks for ln in b)
+        results.add(has_x)
+
+    assert len(results) == 2
+
+
+def test_choice_block_chance_flat_stable_false_varies(make_parser):
+    doc = {
+        "s": {
+            "values": [
+                {"choice": {"chance": 0.5, "stable": False, "values": ["a", "b"]}}
+            ]
+        }
+    }
+
+    results = set()
+    for _ in range(50):
+        blocks = make_parser(seed=42).parse_document(doc)
+        results.add(bool(blocks))
+
+    assert len(results) == 2
+
+
+def test_section_chance_flat_without_stable_still_deterministic(make_parser):
+    doc = {"s": {"chance": 0.5, "values": ["x"]}}
+
+    first = make_parser(seed=42).parse_document(doc)
+    for _ in range(20):
+        assert make_parser(seed=42).parse_document(doc) == first

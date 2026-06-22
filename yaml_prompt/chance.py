@@ -61,15 +61,23 @@ class ChanceEvaluator:
         """Return ``True`` if *obj* passes its chance gate (or has none)."""
         if "chance" not in obj:
             return True
-        return self.evaluate(obj["chance"], obj)
+        return self.evaluate(self._promote_chance(obj), obj)
 
     def apply_to_section(self, section: Any) -> Any | None:
         """Evaluate section-level chance; return cleaned section or ``None``."""
         if not isinstance(section, dict) or "chance" not in section:
             return section
-        if not self.evaluate(section["chance"], section):
+        if not self.evaluate(self._promote_chance(section), section):
             return None
         return {k: v for k, v in section.items() if k != "chance"}
+
+    @staticmethod
+    def _promote_chance(parent: dict[str, Any]) -> float | dict[str, Any]:
+        """Lift sibling ``stable`` into the ``chance`` value when it is a plain float."""
+        raw = parent["chance"]
+        if isinstance(raw, dict) or "stable" not in parent:
+            return raw
+        return {"value": raw, "stable": parent["stable"]}
 
     def _stable_chance(
         self,

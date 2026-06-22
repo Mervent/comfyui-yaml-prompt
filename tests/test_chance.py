@@ -76,3 +76,47 @@ def test_apply_to_section_non_dict_passthrough(chance_evaluator):
     """Strings, None, and other non-dicts pass through unchanged."""
     assert chance_evaluator.apply_to_section("just text") == "just text"
     assert chance_evaluator.apply_to_section(None) is None
+
+
+def test_promote_chance_plain_float_without_stable(chance_evaluator):
+    parent = {"chance": 0.5, "values": ["a"]}
+
+    result = chance_evaluator._promote_chance(parent)
+
+    assert result == 0.5
+
+
+def test_promote_chance_plain_float_with_sibling_stable(chance_evaluator):
+    parent = {"chance": 0.5, "stable": False, "values": ["a"]}
+
+    result = chance_evaluator._promote_chance(parent)
+
+    assert result == {"value": 0.5, "stable": False}
+
+
+def test_promote_chance_dict_unchanged_despite_sibling_stable(chance_evaluator):
+    parent = {"chance": {"value": 0.7}, "stable": False, "values": ["a"]}
+
+    result = chance_evaluator._promote_chance(parent)
+
+    assert result == {"value": 0.7}
+
+
+def test_check_sibling_stable_false_uses_random(chance_evaluator):
+    obj = {"name": "x", "chance": 0.5, "stable": False}
+
+    results = set()
+    for _ in range(50):
+        results.add(chance_evaluator.check(obj))
+
+    assert len(results) == 2
+
+
+def test_apply_to_section_sibling_stable_false_uses_random(chance_evaluator):
+    section = {"chance": 0.5, "stable": False, "values": ["a"]}
+
+    results = set()
+    for _ in range(50):
+        results.add(chance_evaluator.apply_to_section(section) is not None)
+
+    assert len(results) == 2
