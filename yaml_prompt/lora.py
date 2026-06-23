@@ -47,12 +47,26 @@ def _parse_lora_match(inner: str) -> tuple[str, float, float] | None:
     if not name:
         return None
 
+    if not _has_model_extension(name):
+        name = name + ".safetensors"
+
     if len(parts) >= 3:
         return (name, _safe_float(parts[1]), _safe_float(parts[2]))
     if len(parts) == 2:
         model_weight = _safe_float(parts[1])
         return (name, model_weight, model_weight)
     return (name, 1.0, 1.0)
+
+
+_MODEL_EXTENSIONS: frozenset[str] = frozenset(
+    {".safetensors", ".ckpt", ".pt", ".pth", ".bin"}
+)
+
+
+def _has_model_extension(name: str) -> bool:
+    """Return ``True`` if *name* already ends with a known model file extension."""
+    lower = name.lower()
+    return any(lower.endswith(ext) for ext in _MODEL_EXTENSIONS)
 
 
 def _safe_float(text: str, default: float = 1.0) -> float:
