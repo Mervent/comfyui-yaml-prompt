@@ -17,7 +17,7 @@ _LBW_DEFAULT_B = 1.0
 _LBW_INVERSE = False
 
 _file_cache: dict[str, dict[str, Any]] = {}
-_lbw_cache: dict[tuple[str, str, float, float, bool, int], tuple[dict, list]] = {}
+_lbw_cache: dict[tuple, tuple[dict, list]] = {}
 
 
 def _try_import_inspire_lbw():
@@ -101,22 +101,24 @@ class ApplyLoraStack:
         if entry.lbw is not None:
             return self._apply_lbw(model, clip, entry, lora_path, lora_data)
 
-        logger.info(
-            "LOAD LORA: %s: %s, %s",
-            entry.name,
-            entry.model_weight,
-            entry.clip_weight,
-        )
-        return self._apply_standard(model, clip, entry, lora_data)
+        return self._apply_standard(model, clip, entry, lora_path, lora_data)
 
     def _apply_standard(
         self,
         model: Any,
         clip: Any,
         entry: LoraEntry,
+        lora_path: str,
         lora_data: dict[str, Any],
     ) -> tuple[Any, Any]:
         import comfy.sd
+
+        logger.info(
+            "LOAD LORA: %s: %s, %s",
+            entry.name,
+            entry.model_weight,
+            entry.clip_weight,
+        )
 
         model_out, clip_out = comfy.sd.load_lora_for_models(
             model,
@@ -141,12 +143,13 @@ class ApplyLoraStack:
                 "Inspire Pack not installed — ignoring LBW for %s, applying standard",
                 entry.name,
             )
-            return self._apply_standard(model, clip, entry, lora_data)
+            return self._apply_standard(model, clip, entry, lora_path, lora_data)
 
         lbw_a = entry.lbw_a if entry.lbw_a is not None else _LBW_DEFAULT_A
         lbw_b = entry.lbw_b if entry.lbw_b is not None else _LBW_DEFAULT_B
         block_vector = entry.lbw
 
+        model_id = id(model.model)
         cache_key = (
             lora_path,
             block_vector,
@@ -154,6 +157,7 @@ class ApplyLoraStack:
             lbw_b,
             _LBW_INVERSE,
             _LBW_DEFAULT_SEED,
+            model_id,
         )
 
         cached = cache_key in _lbw_cache
