@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Final
 
 from .lora import LoraEntry
@@ -74,11 +75,17 @@ class ApplyLoraStack:
         if not lora_stack_lbw:
             return (model, clip)
 
+        t_total = time.perf_counter()
         _evict_stale(lora_stack_lbw)
 
         for entry in lora_stack_lbw:
             model, clip = self._apply_entry(model, clip, entry)
 
+        logger.info(
+            "LORA STACK DONE: %d entries in %.3fs",
+            len(lora_stack_lbw),
+            time.perf_counter() - t_total,
+        )
         return (model, clip)
 
     def _apply_entry(
@@ -113,19 +120,20 @@ class ApplyLoraStack:
     ) -> tuple[Any, Any]:
         import comfy.sd
 
-        logger.info(
-            "LOAD LORA: %s: %s, %s",
-            entry.name,
-            entry.model_weight,
-            entry.clip_weight,
-        )
-
+        t = time.perf_counter()
         model_out, clip_out = comfy.sd.load_lora_for_models(
             model,
             clip,
             lora_data,
             entry.model_weight,
             entry.clip_weight,
+        )
+        logger.info(
+            "LOAD LORA: %s: %s, %s in %.3fs",
+            entry.name,
+            entry.model_weight,
+            entry.clip_weight,
+            time.perf_counter() - t,
         )
         return (model_out, clip_out)
 
@@ -163,7 +171,9 @@ class ApplyLoraStack:
         cached = cache_key in _lbw_cache
         if cached:
             block_weights, muted_weights = _lbw_cache[cache_key]
+            t_lbw = 0.0
         else:
+            t = time.perf_counter()
             block_weights, muted_weights, _ = load_lbw(
                 model,
                 clip,
@@ -175,18 +185,9 @@ class ApplyLoraStack:
                 block_vector,
             )
             _lbw_cache[cache_key] = (block_weights, muted_weights)
+            t_lbw = time.perf_counter() - t
 
-        logger.info(
-            "LOAD LORA: %s: %s, %s, LBW=%s, A=%s, B=%s%s",
-            entry.name,
-            entry.model_weight,
-            entry.clip_weight,
-            block_vector,
-            lbw_a,
-            lbw_b,
-            " (cached)" if cached else "",
-        )
-
+        t_apply = time.perf_counter()
         new_model = model.clone()
         new_clip = clip.clone()
         muted_set = set(muted_weights)
@@ -199,6 +200,20 @@ class ApplyLoraStack:
                 new_clip.add_patches({k: weights}, entry.clip_weight * ratio)
             else:
                 new_model.add_patches({k: weights}, entry.model_weight * ratio)
+        t_apply = time.perf_counter() - t_apply
+
+        logger.info(
+            "LOAD LORA: %s: %s, %s, LBW=%s, A=%s, B=%s (lbw=%.3fs, apply=%.3fs%s)",
+            entry.name,
+            entry.model_weight,
+            entry.clip_weight,
+            block_vector,
+            lbw_a,
+            lbw_b,
+            t_lbw,
+            t_apply,
+            ", cached" if cached else "",
+        )
 
         return (new_model, new_clip)
 
@@ -208,8 +223,10 @@ def _get_lora_file(lora_path: str, name: str) -> dict[str, Any]:
         logger.info("LORA FILE CACHED: %s", name)
         return _file_cache[lora_path]
 
+    t = time.perf_counter()
     lora_data = _load_lora_file(lora_path)
     _file_cache[lora_path] = lora_data
+    logger.info("LORA FILE LOADED: %s in %.3fs", name, time.perf_counter() - t)
     return lora_data
 
 
