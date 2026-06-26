@@ -24,8 +24,8 @@ def test_node_input_types(node_class):
 
 
 def test_node_return_types(node_class):
-    assert node_class.RETURN_TYPES == ["STRING", "LORA_STACK"]
-    assert node_class.RETURN_NAMES == ["prompt", "lora_stack"]
+    assert node_class.RETURN_TYPES == ["STRING", "LORA_STACK", "LORA_STACK_LBW"]
+    assert node_class.RETURN_NAMES == ["prompt", "lora_stack", "lora_stack_lbw"]
 
 
 def test_node_run_valid_file(node, write_yaml):
@@ -34,9 +34,10 @@ def test_node_run_valid_file(node, write_yaml):
     result = node.run(path, "", seed=42, jinja_vars="{}")
 
     assert isinstance(result, tuple)
-    assert len(result) == 2
+    assert len(result) == 3
     assert "hello, world" in result[0]
     assert result[1] == []
+    assert result[2] == []
 
 
 def test_node_run_missing_file(node):
@@ -92,7 +93,7 @@ def test_node_lora_extraction(node, write_yaml):
 
     assert "detail_v2" not in result[0]
     assert "beautiful scenery" in result[0]
-    assert result[1] == [("detail_v2", 0.8, 0.8)]
+    assert result[1] == [("detail_v2.safetensors", 0.8, 0.8)]
 
 
 def test_node_lora_multiple(node, write_yaml):
@@ -103,7 +104,7 @@ def test_node_lora_multiple(node, write_yaml):
     result = node.run(path, "", seed=42, jinja_vars="{}")
 
     assert "<lora:" not in result[0]
-    assert result[1] == [("real", 0.7, 0.7), ("anime", 0.5, 0.3)]
+    assert result[1] == [("real.safetensors", 0.7, 0.7), ("anime.safetensors", 0.5, 0.3)]
 
 
 def test_node_lora_excluded_by_jinja_condition(node, write_yaml):
@@ -123,7 +124,7 @@ def test_node_lora_included_by_jinja_condition(node, write_yaml):
 
     result = node.run(path, "", seed=42, jinja_vars='{"mode": "anime"}')
 
-    assert result[1] == [("anime", 0.8, 0.8)]
+    assert result[1] == [("anime.safetensors", 0.8, 0.8)]
     assert "<lora:" not in result[0]
 
 

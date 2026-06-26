@@ -15,8 +15,8 @@ class YAMLPromptLoader:
     """ComfyUI node that loads and parses a YAML prompt file."""
 
     CATEGORY: Final[str] = "Prompt"
-    RETURN_TYPES: Final[list[str]] = ["STRING", "LORA_STACK"]
-    RETURN_NAMES: Final[list[str]] = ["prompt", "lora_stack"]
+    RETURN_TYPES: Final[list[str]] = ["STRING", "LORA_STACK", "LORA_STACK_LBW"]
+    RETURN_NAMES: Final[list[str]] = ["prompt", "lora_stack", "lora_stack_lbw"]
     FUNCTION: Final[str] = "run"
 
     def run(
@@ -38,7 +38,7 @@ class YAMLPromptLoader:
         try:
             vars_dict = json.loads(jinja_vars) if jinja_vars.strip() else {}
         except json.JSONDecodeError as error:
-            return (f"Invalid JSON in jinja_vars: {error}", [])
+            return (f"Invalid JSON in jinja_vars: {error}", [], [])
 
         if seed == -1:
             seed = random.randint(0, 9999999999999)
@@ -52,9 +52,9 @@ class YAMLPromptLoader:
                 keep_lora_tags=keep_lora_tags,
             )
         except PipelineError as error:
-            return (str(error), [])
+            return (str(error), [], [])
 
-        return (result.prompt, result.lora_stack)
+        return (result.prompt, result.lora_stack, result.lora_stack_lbw)
 
     @classmethod
     def IS_CHANGED(cls, *_: Any, **__: Any) -> float:

@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 from .jinja_env import render_template
-from .lora import extract_lora_tags, strip_lora_tags
+from .lora import LoraEntry, extract_lora_tags, extract_lora_tags_lbw, strip_lora_tags
 from .parser import YAMLPromptTemplateParser
 
 __all__ = ["process_file", "merge_documents", "PipelineError", "PipelineResult"]
@@ -23,6 +23,7 @@ class PipelineError(Exception):
 class PipelineResult:
     prompt: str
     lora_stack: list[tuple[str, float, float]]
+    lora_stack_lbw: list[LoraEntry]
     blocks: list[list[str]]
 
 
@@ -96,5 +97,11 @@ def process_file(
     prompt_lines = [line for block in blocks for line in block]
     prompt_text = "\n\n".join(prompt_lines)
     lora_stack = extract_lora_tags(prompt_text)
+    lora_stack_lbw = extract_lora_tags_lbw(prompt_text)
     final_prompt = prompt_text if keep_lora_tags else strip_lora_tags(prompt_text)
-    return PipelineResult(prompt=final_prompt, lora_stack=lora_stack, blocks=blocks)
+    return PipelineResult(
+        prompt=final_prompt,
+        lora_stack=lora_stack,
+        lora_stack_lbw=lora_stack_lbw,
+        blocks=blocks,
+    )

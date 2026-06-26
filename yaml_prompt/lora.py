@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass
 
-__all__ = ["extract_lora_tags", "strip_lora_tags"]
+__all__ = [
+    "extract_lora_tags",
+    "extract_lora_tags_lbw",
+    "strip_lora_tags",
+    "LoraEntry",
+]
 
 LORA_TAG_PATTERN = re.compile(r"<lora:([^>]+)>")
 
@@ -35,6 +41,87 @@ def strip_lora_tags(text: str) -> str:
     """Remove all ``<lora:...>`` tags and collapse resulting whitespace."""
     stripped = LORA_TAG_PATTERN.sub("", text)
     return re.sub(r"  +", " ", stripped).strip()
+
+
+@dataclass(frozen=True)
+class LoraEntry:
+    """Extended lora descriptor with optional LBW (LoRA Block Weight) fields."""
+
+    name: str
+    model_weight: float
+    clip_weight: float
+    lbw: str | None = None
+    lbw_a: float | None = None
+    lbw_b: float | None = None
+
+
+def extract_lora_tags_lbw(text: str) -> list[LoraEntry]:
+    """Return a deduplicated list of :class:`LoraEntry` with LBW fields.
+
+    Parses Impact Pack-style syntax::
+
+        <lora:name:0.8:LBW=SD-ALL:A=0.5:B=0.3>
+    """
+    results: list[LoraEntry] = []
+    seen: set[str] = set()
+
+    for match in LORA_TAG_PATTERN.finditer(text):
+        entry = _parse_lora_match_lbw(match.group(1))
+        if entry is None:
+            continue
+        if entry.name in seen:
+            continue
+        seen.add(entry.name)
+        results.append(entry)
+
+    return results
+
+
+def _parse_lora_match_lbw(inner: str) -> LoraEntry | None:
+    """Parse ``<lora:...>`` content into a :class:`LoraEntry` with LBW fields."""
+    parts = inner.split(":")
+    name = parts[0].strip()
+    if not name:
+        return None
+
+    if not _has_model_extension(name):
+        name = name + ".safetensors"
+
+    model_weight = 1.0
+    clip_weight: float | None = None
+    lbw: str | None = None
+    lbw_a: float | None = None
+    lbw_b: float | None = None
+
+    numeric_weights: list[float] = []
+    for part in parts[1:]:
+        stripped = part.strip()
+        if stripped.startswith("LBW="):
+            lbw = stripped[4:]
+        elif stripped.startswith("A="):
+            lbw_a = _safe_float(stripped[2:])
+        elif stripped.startswith("B="):
+            lbw_b = _safe_float(stripped[2:])
+        elif len(numeric_weights) < 2:
+            numeric_weights.append(_safe_float(stripped))
+
+    if len(numeric_weights) >= 2:
+        model_weight = numeric_weights[0]
+        clip_weight = numeric_weights[1]
+    elif len(numeric_weights) == 1:
+        model_weight = numeric_weights[0]
+
+    if clip_weight is None:
+        clip_weight = model_weight
+
+    return LoraEntry(
+        name=name,
+        model_weight=model_weight,
+        clip_weight=clip_weight,
+        lbw=lbw,
+        lbw_a=lbw_a,
+        lbw_b=lbw_b,
+    )
 
 
 def _parse_lora_match(inner: str) -> tuple[str, float, float] | None:
