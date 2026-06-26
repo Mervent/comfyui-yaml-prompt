@@ -16,6 +16,9 @@ _LBW_DEFAULT_A = 4.0
 _LBW_DEFAULT_B = 1.0
 _LBW_INVERSE = False
 
+_file_cache: dict[str, dict[str, Any]] = {}
+_lbw_cache: dict[tuple[str, str, float, float, bool, int], tuple[dict, list]] = {}
+
 
 def _try_import_inspire_lbw():
     try:
@@ -50,8 +53,7 @@ class ApplyLoraStack:
     FUNCTION: Final[str] = "run"
 
     def __init__(self) -> None:
-        self._file_cache: dict[str, dict[str, Any]] = {}
-        self._lbw_cache: dict[tuple[str, str, float, float, bool, int], tuple[dict, list]] = {}
+        pass
 
     @classmethod
     def INPUT_TYPES(cls) -> dict[str, Any]:
@@ -72,7 +74,7 @@ class ApplyLoraStack:
         if not lora_stack_lbw:
             return (model, clip)
 
-        self._evict_stale(lora_stack_lbw)
+        _evict_stale(lora_stack_lbw)
 
         for entry in lora_stack_lbw:
             model, clip = self._apply_entry(model, clip, entry)
@@ -87,17 +89,24 @@ class ApplyLoraStack:
     ) -> tuple[Any, Any]:
         lora_path = _resolve_lora_path(entry.name)
         if lora_path is None:
-            logger.warning("LoRA not found: %s", entry.name)
+            logger.warning("LoRA not found, skipping: %s", entry.name)
             return (model, clip)
 
         if entry.model_weight == 0 and entry.clip_weight == 0:
+            logger.info("SKIP LORA (zero weight): %s", entry.name)
             return (model, clip)
 
-        lora_data = self._get_lora_file(lora_path)
+        lora_data = _get_lora_file(lora_path, entry.name)
 
         if entry.lbw is not None:
             return self._apply_lbw(model, clip, entry, lora_path, lora_data)
 
+        logger.info(
+            "LOAD LORA: %s: %s, %s",
+            entry.name,
+            entry.model_weight,
+            entry.clip_weight,
+        )
         return self._apply_standard(model, clip, entry, lora_data)
 
     def _apply_standard(
@@ -110,7 +119,11 @@ class ApplyLoraStack:
         import comfy.sd
 
         model_out, clip_out = comfy.sd.load_lora_for_models(
-            model, clip, lora_data, entry.model_weight, entry.clip_weight,
+            model,
+            clip,
+            lora_data,
+            entry.model_weight,
+            entry.clip_weight,
         )
         return (model_out, clip_out)
 
@@ -134,16 +147,41 @@ class ApplyLoraStack:
         lbw_b = entry.lbw_b if entry.lbw_b is not None else _LBW_DEFAULT_B
         block_vector = entry.lbw
 
-        cache_key = (lora_path, block_vector, lbw_a, lbw_b, _LBW_INVERSE, _LBW_DEFAULT_SEED)
+        cache_key = (
+            lora_path,
+            block_vector,
+            lbw_a,
+            lbw_b,
+            _LBW_INVERSE,
+            _LBW_DEFAULT_SEED,
+        )
 
-        if cache_key in self._lbw_cache:
-            block_weights, muted_weights = self._lbw_cache[cache_key]
+        cached = cache_key in _lbw_cache
+        if cached:
+            block_weights, muted_weights = _lbw_cache[cache_key]
         else:
             block_weights, muted_weights, _ = load_lbw(
-                model, clip, lora_data, _LBW_INVERSE, _LBW_DEFAULT_SEED,
-                lbw_a, lbw_b, block_vector,
+                model,
+                clip,
+                lora_data,
+                _LBW_INVERSE,
+                _LBW_DEFAULT_SEED,
+                lbw_a,
+                lbw_b,
+                block_vector,
             )
-            self._lbw_cache[cache_key] = (block_weights, muted_weights)
+            _lbw_cache[cache_key] = (block_weights, muted_weights)
+
+        logger.info(
+            "LOAD LORA: %s: %s, %s, LBW=%s, A=%s, B=%s%s",
+            entry.name,
+            entry.model_weight,
+            entry.clip_weight,
+            block_vector,
+            lbw_a,
+            lbw_b,
+            " (cached)" if cached else "",
+        )
 
         new_model = model.clone()
         new_clip = clip.clone()
@@ -160,25 +198,28 @@ class ApplyLoraStack:
 
         return (new_model, new_clip)
 
-    def _get_lora_file(self, lora_path: str) -> dict[str, Any]:
-        if lora_path in self._file_cache:
-            return self._file_cache[lora_path]
 
-        lora_data = _load_lora_file(lora_path)
-        self._file_cache[lora_path] = lora_data
-        return lora_data
+def _get_lora_file(lora_path: str, name: str) -> dict[str, Any]:
+    if lora_path in _file_cache:
+        logger.info("LORA FILE CACHED: %s", name)
+        return _file_cache[lora_path]
 
-    def _evict_stale(self, lora_stack_lbw: list[LoraEntry]) -> None:
-        needed_paths: set[str] = set()
-        for entry in lora_stack_lbw:
-            path = _resolve_lora_path(entry.name)
-            if path is not None:
-                needed_paths.add(path)
+    lora_data = _load_lora_file(lora_path)
+    _file_cache[lora_path] = lora_data
+    return lora_data
 
-        for path in list(self._file_cache):
-            if path not in needed_paths:
-                del self._file_cache[path]
 
-        for key in list(self._lbw_cache):
-            if key[0] not in needed_paths:
-                del self._lbw_cache[key]
+def _evict_stale(lora_stack_lbw: list[LoraEntry]) -> None:
+    needed_paths: set[str] = set()
+    for entry in lora_stack_lbw:
+        path = _resolve_lora_path(entry.name)
+        if path is not None:
+            needed_paths.add(path)
+
+    for path in list(_file_cache):
+        if path not in needed_paths:
+            del _file_cache[path]
+
+    for key in list(_lbw_cache):
+        if key[0] not in needed_paths:
+            del _lbw_cache[key]
