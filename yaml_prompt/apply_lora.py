@@ -192,14 +192,14 @@ class ApplyLoraStack:
         new_clip = clip.clone()
         muted_set = set(muted_weights)
 
-        for k, v in block_weights.items():
-            weights, ratio = v
-            if k in muted_set:
-                continue
-            if "text" in k or "encoder" in k:
-                new_clip.add_patches({k: weights}, entry.clip_weight * ratio)
-            else:
-                new_model.add_patches({k: weights}, entry.model_weight * ratio)
+        _bulk_add_lbw_patches(
+            new_model,
+            new_clip,
+            block_weights,
+            muted_set,
+            entry.model_weight,
+            entry.clip_weight,
+        )
         t_apply = time.perf_counter() - t_apply
 
         logger.info(
@@ -216,6 +216,48 @@ class ApplyLoraStack:
         )
 
         return (new_model, new_clip)
+
+
+def _bulk_add_lbw_patches(
+    model: Any,
+    clip: Any,
+    block_weights: dict[str, Any],
+    muted_set: set[str],
+    strength_model: float,
+    strength_clip: float,
+) -> None:
+    import uuid
+
+    model_sd = model.model.state_dict()
+    clip_sd = clip.cond_stage_model.state_dict()
+
+    for k, v in block_weights.items():
+        weights, ratio = v
+        if k in muted_set:
+            continue
+
+        if isinstance(k, tuple):
+            key = k[0]
+            offset = k[1]
+            function = k[2] if len(k) > 2 else None
+        else:
+            key = k
+            offset = None
+            function = None
+
+        if "text" in key or "encoder" in key:
+            if key in clip_sd:
+                current = clip.patcher.patches.get(key, [])
+                current.append((strength_clip * ratio, weights, 1.0, offset, function))
+                clip.patcher.patches[key] = current
+        else:
+            if key in model_sd:
+                current = model.patches.get(key, [])
+                current.append((strength_model * ratio, weights, 1.0, offset, function))
+                model.patches[key] = current
+
+    model.patches_uuid = uuid.uuid4()
+    clip.patcher.patches_uuid = uuid.uuid4()
 
 
 def _get_lora_file(lora_path: str, name: str) -> dict[str, Any]:
