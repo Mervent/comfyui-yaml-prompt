@@ -78,11 +78,21 @@ class ApplyLoraStack:
         t_total = time.perf_counter()
         _evict_stale(lora_stack_lbw)
 
-        for entry in lora_stack_lbw:
+        names = ", ".join(e.name for e in lora_stack_lbw)
+        logger.info("── LORA STACK START (%d): %s ──", len(lora_stack_lbw), names)
+
+        for i, entry in enumerate(lora_stack_lbw, 1):
+            logger.info(
+                "  [%d/%d] %s (P=%d)",
+                i,
+                len(lora_stack_lbw),
+                entry.name,
+                entry.priority,
+            )
             model, clip = self._apply_entry(model, clip, entry)
 
         logger.info(
-            "LORA STACK DONE: %d entries in %.3fs",
+            "── LORA STACK DONE: %d entries in %.3fs ──",
             len(lora_stack_lbw),
             time.perf_counter() - t_total,
         )

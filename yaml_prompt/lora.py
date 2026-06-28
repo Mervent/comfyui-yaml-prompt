@@ -19,22 +19,26 @@ LORA_TAG_PATTERN = re.compile(r"<lora:([^>]+)>")
 def extract_lora_tags(text: str) -> list[tuple[str, float, float]]:
     """Return a deduplicated list of ``(name, model_weight, clip_weight)`` tuples.
 
-    Duplicate lora names keep the first occurrence only.
+    Duplicate lora names keep the first occurrence only.  Results are
+    sorted by ``P=`` priority (ascending); within the same priority,
+    text-appearance order is preserved.
     """
-    results: list[tuple[str, float, float]] = []
+    entries: list[tuple[tuple[str, float, float], int]] = []
     seen: set[str] = set()
 
     for match in LORA_TAG_PATTERN.finditer(text):
         parsed = _parse_lora_match(match.group(1))
         if parsed is None:
             continue
-        name = parsed[0]
+        result, priority = parsed
+        name = result[0]
         if name in seen:
             continue
         seen.add(name)
-        results.append(parsed)
+        entries.append((result, priority))
 
-    return results
+    entries.sort(key=lambda e: e[1])
+    return [e[0] for e in entries]
 
 
 def strip_lora_tags(text: str) -> str:
@@ -45,7 +49,13 @@ def strip_lora_tags(text: str) -> str:
 
 @dataclass(frozen=True)
 class LoraEntry:
-    """Extended lora descriptor with optional LBW (LoRA Block Weight) fields."""
+    """Extended lora descriptor with optional LBW (LoRA Block Weight) fields.
+
+    The ``priority`` field controls application order: higher values are
+    applied later (and therefore take precedence over earlier loras).
+    Default is ``0``.  Within the same priority level, text-appearance
+    order is preserved.
+    """
 
     name: str
     model_weight: float
@@ -53,6 +63,7 @@ class LoraEntry:
     lbw: str | None = None
     lbw_a: float | None = None
     lbw_b: float | None = None
+    priority: int = 0
 
 
 def extract_lora_tags_lbw(text: str) -> list[LoraEntry]:
@@ -61,6 +72,9 @@ def extract_lora_tags_lbw(text: str) -> list[LoraEntry]:
     Parses Impact Pack-style syntax::
 
         <lora:name:0.8:LBW=SD-ALL:A=0.5:B=0.3>
+
+    Results are sorted by :attr:`LoraEntry.priority` (ascending); within
+    the same priority, text-appearance order is preserved.
     """
     results: list[LoraEntry] = []
     seen: set[str] = set()
@@ -74,6 +88,7 @@ def extract_lora_tags_lbw(text: str) -> list[LoraEntry]:
         seen.add(entry.name)
         results.append(entry)
 
+    results.sort(key=lambda e: e.priority)
     return results
 
 
@@ -92,6 +107,7 @@ def _parse_lora_match_lbw(inner: str) -> LoraEntry | None:
     lbw: str | None = None
     lbw_a: float | None = None
     lbw_b: float | None = None
+    priority: int = 0
 
     numeric_weights: list[float] = []
     for part in parts[1:]:
@@ -102,6 +118,8 @@ def _parse_lora_match_lbw(inner: str) -> LoraEntry | None:
             lbw_a = _safe_float(stripped[2:])
         elif stripped.startswith("B="):
             lbw_b = _safe_float(stripped[2:])
+        elif stripped.startswith("P="):
+            priority = _safe_int(stripped[2:])
         elif len(numeric_weights) < 2:
             numeric_weights.append(_safe_float(stripped))
 
@@ -121,13 +139,15 @@ def _parse_lora_match_lbw(inner: str) -> LoraEntry | None:
         lbw=lbw,
         lbw_a=lbw_a,
         lbw_b=lbw_b,
+        priority=priority,
     )
 
 
-def _parse_lora_match(inner: str) -> tuple[str, float, float] | None:
-    """Parse the content inside a `<lora:...>` tag into (name, model_w, clip_w).
+def _parse_lora_match(inner: str) -> tuple[tuple[str, float, float], int] | None:
+    """Parse ``<lora:...>`` into ``((name, model_w, clip_w), priority)``.
 
-    Returns ``None`` for empty names.
+    Returns ``None`` for empty names.  Key-value parts (``P=``, ``LBW=``,
+    etc.) are filtered out before positional weight parsing.
     """
     parts = inner.split(":")
     name = parts[0].strip()
@@ -137,12 +157,26 @@ def _parse_lora_match(inner: str) -> tuple[str, float, float] | None:
     if not _has_model_extension(name):
         name = name + ".safetensors"
 
-    if len(parts) >= 3:
-        return (name, _safe_float(parts[1]), _safe_float(parts[2]))
-    if len(parts) == 2:
-        model_weight = _safe_float(parts[1])
-        return (name, model_weight, model_weight)
-    return (name, 1.0, 1.0)
+    priority = 0
+    numeric_parts: list[str] = []
+    for part in parts[1:]:
+        stripped = part.strip()
+        if stripped.startswith("P="):
+            priority = _safe_int(stripped[2:])
+        elif "=" in stripped:
+            continue
+        else:
+            numeric_parts.append(stripped)
+
+    if len(numeric_parts) >= 2:
+        result = (name, _safe_float(numeric_parts[0]), _safe_float(numeric_parts[1]))
+    elif len(numeric_parts) == 1:
+        model_weight = _safe_float(numeric_parts[0])
+        result = (name, model_weight, model_weight)
+    else:
+        result = (name, 1.0, 1.0)
+
+    return result, priority
 
 
 _MODEL_EXTENSIONS: frozenset[str] = frozenset(
@@ -164,3 +198,10 @@ def _safe_float(text: str, default: float = 1.0) -> float:
     if not math.isfinite(value):
         return default
     return value
+
+
+def _safe_int(text: str, default: int = 0) -> int:
+    try:
+        return int(text)
+    except ValueError:
+        return default

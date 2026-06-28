@@ -200,3 +200,109 @@ def test_lbw_name_only():
     result = extract_lora_tags_lbw("<lora:x>")
 
     assert result == [LoraEntry("x.safetensors", 1.0, 1.0)]
+
+
+def test_priority_default_zero():
+    result = extract_lora_tags_lbw("<lora:x:0.8>")
+
+    assert result[0].priority == 0
+
+
+def test_priority_parsed_lbw():
+    result = extract_lora_tags_lbw("<lora:x:0.8:P=5>")
+
+    assert result == [LoraEntry("x.safetensors", 0.8, 0.8, priority=5)]
+
+
+def test_priority_with_lbw_fields():
+    result = extract_lora_tags_lbw("<lora:x:0.8:LBW=SD-ALL:A=0.5:P=3>")
+
+    assert result == [
+        LoraEntry("x.safetensors", 0.8, 0.8, lbw="SD-ALL", lbw_a=0.5, priority=3)
+    ]
+
+
+def test_priority_sorts_ascending_lbw():
+    text = "<lora:char:0.7:P=0> <lora:comp:0.8:P=1>"
+
+    result = extract_lora_tags_lbw(text)
+
+    assert result[0].name == "char.safetensors"
+    assert result[1].name == "comp.safetensors"
+
+
+def test_priority_sorts_ascending_reversed_text_order():
+    text = "<lora:comp:0.8:P=1> <lora:char:0.7:P=0>"
+
+    result = extract_lora_tags_lbw(text)
+
+    assert result[0].name == "char.safetensors"
+    assert result[1].name == "comp.safetensors"
+
+
+def test_priority_stable_sort_preserves_text_order():
+    text = "<lora:a:0.5> <lora:b:0.6> <lora:c:0.7>"
+
+    result = extract_lora_tags_lbw(text)
+
+    assert [e.name for e in result] == [
+        "a.safetensors",
+        "b.safetensors",
+        "c.safetensors",
+    ]
+
+
+def test_priority_mixed_default_and_explicit():
+    text = "<lora:char_a:0.7> <lora:comp:0.8:P=1> <lora:char_b:0.6>"
+
+    result = extract_lora_tags_lbw(text)
+
+    assert [e.name for e in result] == [
+        "char_a.safetensors",
+        "char_b.safetensors",
+        "comp.safetensors",
+    ]
+
+
+def test_priority_invalid_defaults_to_zero():
+    result = extract_lora_tags_lbw("<lora:x:0.8:P=abc>")
+
+    assert result[0].priority == 0
+
+
+def test_priority_negative():
+    text = "<lora:first:0.5:P=-1> <lora:second:0.5>"
+
+    result = extract_lora_tags_lbw(text)
+
+    assert result[0].name == "first.safetensors"
+    assert result[0].priority == -1
+
+
+def test_priority_sorts_tuples():
+    text = "<lora:comp:0.8:P=1> <lora:char:0.7>"
+
+    result = extract_lora_tags(text)
+
+    assert result == [
+        ("char.safetensors", 0.7, 0.7),
+        ("comp.safetensors", 0.8, 0.8),
+    ]
+
+
+def test_priority_tuple_ignores_kv_for_weights():
+    result = extract_lora_tags("<lora:x:0.5:LBW=SD-ALL:P=2>")
+
+    assert result == [("x.safetensors", 0.5, 0.5)]
+
+
+def test_priority_tuple_stable_sort():
+    text = "<lora:a:0.5> <lora:b:0.6> <lora:c:0.7:P=1>"
+
+    result = extract_lora_tags(text)
+
+    assert result == [
+        ("a.safetensors", 0.5, 0.5),
+        ("b.safetensors", 0.6, 0.6),
+        ("c.safetensors", 0.7, 0.7),
+    ]
