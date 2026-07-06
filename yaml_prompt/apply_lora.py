@@ -57,12 +57,19 @@ class ApplyLoraStack:
         pass
 
     @classmethod
+    def IS_CHANGED(cls, *_: Any, **__: Any) -> float:
+        return time.time()
+
+    @classmethod
     def INPUT_TYPES(cls) -> dict[str, Any]:
         return {
             "required": {
                 "model": ("MODEL",),
                 "clip": ("CLIP",),
                 "lora_stack_lbw": ("LORA_STACK_LBW",),
+            },
+            "optional": {
+                "use_cache": ("BOOLEAN", {"default": True}),
             },
         }
 
@@ -71,15 +78,26 @@ class ApplyLoraStack:
         model: Any,
         clip: Any,
         lora_stack_lbw: list[LoraEntry],
+        use_cache: bool = True,
     ) -> tuple[Any, Any]:
+        if not use_cache:
+            _file_cache.clear()
+            _lbw_cache.clear()
+
         if not lora_stack_lbw:
             return (model, clip)
 
         t_total = time.perf_counter()
-        _evict_stale(lora_stack_lbw)
+        if use_cache:
+            _evict_stale(lora_stack_lbw)
 
         names = ", ".join(e.name for e in lora_stack_lbw)
-        logger.info("── LORA STACK START (%d): %s ──", len(lora_stack_lbw), names)
+        logger.info(
+            "── LORA STACK START (%d)%s: %s ──",
+            len(lora_stack_lbw),
+            "" if use_cache else " [cache disabled]",
+            names,
+        )
 
         for i, entry in enumerate(lora_stack_lbw, 1):
             logger.info(
@@ -89,7 +107,7 @@ class ApplyLoraStack:
                 entry.name,
                 entry.priority,
             )
-            model, clip = self._apply_entry(model, clip, entry)
+            model, clip = self._apply_entry(model, clip, entry, use_cache)
 
         logger.info(
             "── LORA STACK DONE: %d entries in %.3fs ──",
@@ -103,6 +121,7 @@ class ApplyLoraStack:
         model: Any,
         clip: Any,
         entry: LoraEntry,
+        use_cache: bool,
     ) -> tuple[Any, Any]:
         lora_path = _resolve_lora_path(entry.name)
         if lora_path is None:
@@ -113,10 +132,10 @@ class ApplyLoraStack:
             logger.info("SKIP LORA (zero weight): %s", entry.name)
             return (model, clip)
 
-        lora_data = _get_lora_file(lora_path, entry.name)
+        lora_data = _get_lora_file(lora_path, entry.name, use_cache)
 
         if entry.lbw is not None:
-            return self._apply_lbw(model, clip, entry, lora_path, lora_data)
+            return self._apply_lbw(model, clip, entry, lora_path, lora_data, use_cache)
 
         return self._apply_standard(model, clip, entry, lora_path, lora_data)
 
@@ -154,6 +173,7 @@ class ApplyLoraStack:
         entry: LoraEntry,
         lora_path: str,
         lora_data: dict[str, Any],
+        use_cache: bool,
     ) -> tuple[Any, Any]:
         load_lbw = _try_import_inspire_lbw()
         if load_lbw is None:
@@ -178,7 +198,7 @@ class ApplyLoraStack:
             model_id,
         )
 
-        cached = cache_key in _lbw_cache
+        cached = use_cache and cache_key in _lbw_cache
         if cached:
             block_weights, muted_weights = _lbw_cache[cache_key]
             t_lbw = 0.0
@@ -194,7 +214,8 @@ class ApplyLoraStack:
                 lbw_b,
                 block_vector,
             )
-            _lbw_cache[cache_key] = (block_weights, muted_weights)
+            if use_cache:
+                _lbw_cache[cache_key] = (block_weights, muted_weights)
             t_lbw = time.perf_counter() - t
 
         t_apply = time.perf_counter()
@@ -270,14 +291,15 @@ def _bulk_add_lbw_patches(
     clip.patcher.patches_uuid = uuid.uuid4()
 
 
-def _get_lora_file(lora_path: str, name: str) -> dict[str, Any]:
-    if lora_path in _file_cache:
+def _get_lora_file(lora_path: str, name: str, use_cache: bool) -> dict[str, Any]:
+    if use_cache and lora_path in _file_cache:
         logger.info("LORA FILE CACHED: %s", name)
         return _file_cache[lora_path]
 
     t = time.perf_counter()
     lora_data = _load_lora_file(lora_path)
-    _file_cache[lora_path] = lora_data
+    if use_cache:
+        _file_cache[lora_path] = lora_data
     logger.info("LORA FILE LOADED: %s in %.3fs", name, time.perf_counter() - t)
     return lora_data
 
