@@ -409,3 +409,45 @@ def test_group_in_document(parser):
     blocks = parser.parse_document(doc)
 
     assert blocks == [["walking, slowly"]]
+
+
+def test_group_inherits_document_separator(parser):
+    doc = {
+        "separator": " | ",
+        "traits": {"values": [{"group": ["a", "b"]}]},
+    }
+
+    blocks = parser.parse_document(doc)
+
+    assert blocks == [["a | b"]]
+
+
+def test_group_explicit_separator_overrides_document(parser):
+    doc = {
+        "separator": " | ",
+        "traits": {"values": [{"group": {"separator": " / ", "values": ["a", "b"]}}]},
+    }
+
+    blocks = parser.parse_document(doc)
+
+    assert blocks == [["a / b"]]
+
+
+def test_chain_inside_group_inherits_document_separator(parser):
+    doc = {
+        "separator": " | ",
+        "traits": {"values": [{"group": ["a", {"chain": ["b", "c"]}]}]},
+    }
+
+    blocks = parser.parse_document(doc)
+
+    assert blocks == [["a | b | c"]]
+
+
+def test_block_separator_cascades_to_nested_chain(parser):
+    result = parser._resolve_item(
+        {"group": {"separator": " / ", "values": ["a", {"chain": ["b", "c"]}]}},
+        {},
+    )
+
+    assert result == "a / b / c"

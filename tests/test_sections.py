@@ -238,3 +238,68 @@ def test_sections_with_choices_still_separate_blocks(parser):
     blocks = parser.parse_document(doc)
 
     assert len(blocks) == 2
+
+
+def test_document_separator_cascades_to_sections(parser):
+    doc = {
+        "separator": " | ",
+        "tags": {"values": ["a", "b"]},
+        "style": {"values": ["c", "d"]},
+    }
+
+    blocks = parser.parse_document(doc)
+
+    assert blocks == [["a | b"], ["c | d"]]
+
+
+def test_document_separator_overridden_by_section(parser):
+    doc = {
+        "separator": " | ",
+        "tags": {"values": ["a", "b"]},
+        "style": {"separator": ", ", "values": ["c", "d"]},
+    }
+
+    blocks = parser.parse_document(doc)
+
+    assert blocks == [["a | b"], ["c, d"]]
+
+
+def test_document_separator_cascades_to_plain_list_section(parser):
+    doc = {
+        "separator": " ",
+        "tags": ["4k", "hdr", "detailed"],
+    }
+
+    blocks = parser.parse_document(doc)
+
+    assert blocks == [["4k hdr detailed"]]
+
+
+def test_document_separator_empty_string(parser):
+    doc = {
+        "separator": "",
+        "tags": {"values": ["a", "b", "c"]},
+    }
+
+    blocks = parser.parse_document(doc)
+
+    assert blocks == [["abc"]]
+
+
+def test_document_separator_key_not_emitted_as_block(parser):
+    doc = {
+        "separator": " | ",
+        "tags": {"values": ["a"]},
+    }
+
+    blocks = parser.parse_document(doc)
+
+    assert blocks == [["a"]]
+
+
+def test_document_no_separator_defaults_to_comma(parser):
+    doc = {"tags": {"values": ["a", "b"]}}
+
+    blocks = parser.parse_document(doc)
+
+    assert blocks == [["a, b"]]

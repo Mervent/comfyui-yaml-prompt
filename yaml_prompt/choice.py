@@ -47,6 +47,7 @@ class ChoiceResolver:
         block: dict[str, Any],
         variables: dict[str, str],
         _depth: int = 0,
+        inherited_sep: str | None = None,
     ) -> str | None:
         """Pick one option from a choice/oneOf block, applying weights and chance."""
         if not self._chance.check(block):
@@ -57,8 +58,10 @@ class ChoiceResolver:
         if options is None:
             raise ValueError("choice/oneOf requires 'values', 'options', or 'choices'.")
 
+        explicit_sep = block.get("separator")
+        child_sep = str(explicit_sep) if explicit_sep is not None else inherited_sep
         texts, weights = self._filter_and_weigh_options(
-            options, variables, _depth=_depth
+            options, variables, _depth=_depth, inherited_sep=child_sep
         )
         if not texts:
             return None
@@ -80,6 +83,7 @@ class ChoiceResolver:
         _depth: int = 0,
         *,
         skip_failed: bool = False,
+        inherited_sep: str | None = None,
     ) -> str | None:
         """Process chain/group items sequentially, joining their results.
 
@@ -96,6 +100,12 @@ class ChoiceResolver:
             When ``False`` (``chain``), stop at the first item that fails its
             chance gate. When ``True`` (``group``), skip failed items and keep
             going so each item is gated independently.
+        inherited_sep : str | None
+            Separator inherited from an enclosing scope (document or parent
+            block). Used when this block declares no ``separator`` of its own,
+            taking precedence over the type default (``", "`` for group,
+            ``" "`` for chain). Propagated unchanged to nested blocks, or
+            replaced by this block's explicit ``separator`` when present.
 
         Returns
         -------
@@ -112,7 +122,16 @@ class ChoiceResolver:
         if not self._chance.check(block):
             return None
 
-        separator = str(block.get("separator", ", " if skip_failed else " "))
+        explicit_sep = block.get("separator")
+        if explicit_sep is not None:
+            effective_sep: str | None = str(explicit_sep)
+        else:
+            effective_sep = inherited_sep
+        separator = (
+            effective_sep
+            if effective_sep is not None
+            else (", " if skip_failed else " ")
+        )
         template = block.get("template", "$value")
         options = self.get_list_values(block)
         if options is None:
@@ -120,7 +139,7 @@ class ChoiceResolver:
 
         accumulated: list[str] = []
         for item in options:
-            resolved = self._resolve_chain_item(item, variables, _depth)
+            resolved = self._resolve_chain_item(item, variables, _depth, effective_sep)
             if resolved is None:
                 if skip_failed:
                     continue
@@ -140,15 +159,30 @@ class ChoiceResolver:
         item: Any,
         variables: dict[str, str],
         _depth: int,
+        inherited_sep: str | None = None,
     ) -> str | None:
         if isinstance(item, dict) and self.GROUP_KEY in item:
             return self.resolve_chain(
-                self.normalize_block(item), variables, _depth + 1, skip_failed=True
+                self.normalize_block(item),
+                variables,
+                _depth + 1,
+                skip_failed=True,
+                inherited_sep=inherited_sep,
             )
         if isinstance(item, dict) and self.CHAIN_KEY in item:
-            return self.resolve_chain(self.normalize_block(item), variables, _depth + 1)
+            return self.resolve_chain(
+                self.normalize_block(item),
+                variables,
+                _depth + 1,
+                inherited_sep=inherited_sep,
+            )
         if self.is_choice_item(item):
-            return self.resolve(self.normalize_block(item), variables, _depth + 1)
+            return self.resolve(
+                self.normalize_block(item),
+                variables,
+                _depth + 1,
+                inherited_sep=inherited_sep,
+            )
         if isinstance(item, dict) and "name" in item:
             if not self._chance.check(item):
                 return None
@@ -195,6 +229,7 @@ class ChoiceResolver:
         options: list,
         variables: dict[str, str],
         _depth: int = 0,
+        inherited_sep: str | None = None,
     ) -> tuple[list[str], list[float]]:
         """Filter *options* by per-item chance, return ``(texts, weights)``."""
         if _depth > self.MAX_CHOICE_DEPTH:
@@ -206,7 +241,7 @@ class ChoiceResolver:
         texts: list[str] = []
         weights: list[float] = []
         for opt in options:
-            result = self._resolve_option(opt, variables, _depth)
+            result = self._resolve_option(opt, variables, _depth, inherited_sep)
             if result is not None:
                 texts.append(result[0])
                 weights.append(result[1])
@@ -217,6 +252,7 @@ class ChoiceResolver:
         opt: Any,
         variables: dict[str, str],
         _depth: int,
+        inherited_sep: str | None = None,
     ) -> tuple[str, float] | None:
         parsed = self._parse_option(opt)
         if parsed is None:
@@ -230,18 +266,21 @@ class ChoiceResolver:
                     variables,
                     _depth=_depth + 1,
                     skip_failed=True,
+                    inherited_sep=inherited_sep,
                 )
             elif isinstance(content, dict) and self.CHAIN_KEY in content:
                 resolved = self.resolve_chain(
                     self.normalize_block(content),
                     variables,
                     _depth=_depth + 1,
+                    inherited_sep=inherited_sep,
                 )
             else:
                 resolved = self.resolve(
                     self.normalize_block(content),
                     variables,
                     _depth=_depth + 1,
+                    inherited_sep=inherited_sep,
                 )
             if resolved is None:
                 return None

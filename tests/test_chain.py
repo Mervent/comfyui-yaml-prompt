@@ -369,3 +369,33 @@ def test_chain_all_items_no_chance(parser):
     )
 
     assert result == "a b c d"
+
+
+def test_chain_inherits_document_separator(parser):
+    doc = {
+        "separator": ", ",
+        "action": {"values": [{"chain": ["walking", "slowly"]}]},
+    }
+
+    blocks = parser.parse_document(doc)
+
+    assert blocks == [["walking, slowly"]]
+
+
+def test_chain_explicit_separator_overrides_document(parser):
+    doc = {
+        "separator": ", ",
+        "action": {"values": [{"chain": {"separator": " ", "values": ["a", "b"]}}]},
+    }
+
+    blocks = parser.parse_document(doc)
+
+    assert blocks == [["a b"]]
+
+
+def test_chain_keeps_space_default_without_document_separator(parser):
+    doc = {"action": {"values": [{"chain": ["walking", "slowly"]}]}}
+
+    blocks = parser.parse_document(doc)
+
+    assert blocks == [["walking slowly"]]

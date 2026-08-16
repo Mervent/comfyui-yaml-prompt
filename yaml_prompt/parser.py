@@ -59,13 +59,16 @@ class YAMLPromptTemplateParser:
                 f"Check that your YAML file starts with key: value pairs, not a list."
             )
 
+        raw_separator = doc.get("separator")
+        inherited_sep = str(raw_separator) if raw_separator is not None else None
+
         global_vars = self._collect_vars(doc.get("vars", {}), {})
 
         blocks: list[list[str]] = []
         for name, section in doc.items():
-            if name == "vars":
+            if name in ("vars", "separator"):
                 continue
-            lines = self._parse_section(section, global_vars)
+            lines = self._parse_section(section, global_vars, inherited_sep)
             if lines:
                 blocks.append(lines)
 
@@ -75,7 +78,12 @@ class YAMLPromptTemplateParser:
         """Expand ``$vars``, brace lists, and wildcards until stable."""
         return self._expander.expand(text, variables)
 
-    def _parse_section(self, section: Any, variables: dict[str, str]) -> list[str]:
+    def _parse_section(
+        self,
+        section: Any,
+        variables: dict[str, str],
+        inherited_sep: str | None = None,
+    ) -> list[str]:
         if section is None:
             return []
 
@@ -84,21 +92,30 @@ class YAMLPromptTemplateParser:
             return []
 
         variables, item_tpl, block_tpl, separator = self._extract_section_config(
-            section, variables
+            section, variables, inherited_sep
         )
+        if isinstance(section, dict) and "separator" in section:
+            child_sep = str(section["separator"])
+        else:
+            child_sep = inherited_sep
         items = self._extract_items(section)
         is_simple_plain = (
             all(isinstance(e, str) for e in items)
             and item_tpl == "$value"
             and block_tpl is None
         )
-        rendered_lines = self._render_items(items, variables, item_tpl, separator)
+        rendered_lines = self._render_items(
+            items, variables, item_tpl, separator, child_sep
+        )
         return self._apply_templates(
             is_simple_plain, rendered_lines, block_tpl, variables, separator
         )
 
     def _extract_section_config(
-        self, section: Any, variables: dict[str, str]
+        self,
+        section: Any,
+        variables: dict[str, str],
+        inherited_sep: str | None = None,
     ) -> tuple[dict[str, str], str, str | None, str]:
         if isinstance(section, dict) and "vars" in section:
             variables = self._collect_vars(section["vars"], variables)
@@ -106,15 +123,20 @@ class YAMLPromptTemplateParser:
         if isinstance(section, dict):
             raw_item_tpl = section.get("template", "$value")
             raw_block_tpl = section.get("block_template")
-            raw_separator = section.get("separator", ", ")
+            explicit_sep = section.get("separator")
         else:
-            raw_item_tpl, raw_block_tpl, raw_separator = "$value", None, ", "
+            raw_item_tpl, raw_block_tpl, explicit_sep = "$value", None, None
 
         item_tpl = self._expander.expand(raw_item_tpl, variables)
         block_tpl = (
             self._expander.expand(raw_block_tpl, variables) if raw_block_tpl else None
         )
-        separator = str(raw_separator)
+        if explicit_sep is not None:
+            separator = str(explicit_sep)
+        elif inherited_sep is not None:
+            separator = inherited_sep
+        else:
+            separator = ", "
 
         return variables, item_tpl, block_tpl, separator
 
@@ -132,6 +154,7 @@ class YAMLPromptTemplateParser:
         variables: dict[str, str],
         item_tpl: str,
         separator: str = ", ",
+        inherited_sep: str | None = None,
     ) -> list[str]:
         rendered: list[str] = []
         pending: list[str] = []
@@ -146,7 +169,7 @@ class YAMLPromptTemplateParser:
                 or self._choices.is_chain_item(item)
                 or self._choices.is_group_item(item)
             ):
-                result = self._resolve_item(item, variables)
+                result = self._resolve_item(item, variables, inherited_sep)
                 if result is not None:
                     pending.append(result)
                 rendered.append(
@@ -162,7 +185,7 @@ class YAMLPromptTemplateParser:
                 rendered.append(flushed)
             pending = []
 
-            result = self._resolve_item(item, variables)
+            result = self._resolve_item(item, variables, inherited_sep)
             if result is not None:
                 rendered.append(self._apply_item_template(result, item_tpl, variables))
 
@@ -196,19 +219,33 @@ class YAMLPromptTemplateParser:
 
         return [separator.join(rendered_lines)]
 
-    def _resolve_item(self, item: Any, variables: dict[str, str]) -> str | None:
+    def _resolve_item(
+        self,
+        item: Any,
+        variables: dict[str, str],
+        inherited_sep: str | None = None,
+    ) -> str | None:
         if self._choices.is_group_item(item):
             return self._choices.resolve_chain(
-                self._choices.normalize_block(item), variables, skip_failed=True
+                self._choices.normalize_block(item),
+                variables,
+                skip_failed=True,
+                inherited_sep=inherited_sep,
             )
 
         if self._choices.is_chain_item(item):
             return self._choices.resolve_chain(
-                self._choices.normalize_block(item), variables
+                self._choices.normalize_block(item),
+                variables,
+                inherited_sep=inherited_sep,
             )
 
         if self._choices.is_choice_item(item):
-            return self._choices.resolve(self._choices.normalize_block(item), variables)
+            return self._choices.resolve(
+                self._choices.normalize_block(item),
+                variables,
+                inherited_sep=inherited_sep,
+            )
 
         if isinstance(item, dict) and "name" in item:
             if not self._chance.check(item):
