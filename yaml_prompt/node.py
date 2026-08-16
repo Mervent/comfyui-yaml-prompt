@@ -38,21 +38,18 @@ class YAMLPromptLoader:
         try:
             vars_dict = json.loads(jinja_vars) if jinja_vars.strip() else {}
         except json.JSONDecodeError as error:
-            return (f"Invalid JSON in jinja_vars: {error}", [], [])
+            raise PipelineError(f"Invalid JSON in jinja_vars: {error}") from error
 
         if seed == -1:
             seed = random.randint(0, 9999999999999)
 
-        try:
-            result = process_file(
-                path,
-                seed=seed,
-                wildcard_dir=wildcard_dir,
-                jinja_vars=vars_dict or None,
-                keep_lora_tags=keep_lora_tags,
-            )
-        except PipelineError as error:
-            return (str(error), [], [])
+        result = process_file(
+            path,
+            seed=seed,
+            wildcard_dir=wildcard_dir,
+            jinja_vars=vars_dict or None,
+            keep_lora_tags=keep_lora_tags,
+        )
 
         return (result.prompt, result.lora_stack, result.lora_stack_lbw)
 

@@ -2,6 +2,8 @@ import time
 
 import pytest
 
+from yaml_prompt.pipeline import PipelineError
+
 
 @pytest.fixture
 def write_yaml(tmp_path):
@@ -41,19 +43,15 @@ def test_node_run_valid_file(node, write_yaml):
 
 
 def test_node_run_missing_file(node):
-    result = node.run("/nonexistent/file.yaml", "", seed=42, jinja_vars="{}")
-
-    assert "File not found" in result[0]
-    assert result[1] == []
+    with pytest.raises(PipelineError, match="File not found"):
+        node.run("/nonexistent/file.yaml", "", seed=42, jinja_vars="{}")
 
 
 def test_node_run_invalid_yaml(node, write_yaml):
     path = write_yaml("key: [unclosed\n", name="bad.yaml")
 
-    result = node.run(path, "", seed=42, jinja_vars="{}")
-
-    assert "YAML error" in result[0]
-    assert result[1] == []
+    with pytest.raises(PipelineError, match="YAML error"):
+        node.run(path, "", seed=42, jinja_vars="{}")
 
 
 def test_node_seed_minus_1(node, write_yaml):
@@ -155,17 +153,15 @@ def test_node_jinja_vars_empty(node, write_yaml):
 def test_node_jinja_vars_invalid_json(node, write_yaml):
     path = write_yaml("meta:\n  - detailed\n")
 
-    result = node.run(path, "", seed=42, jinja_vars="{bad json}")
-
-    assert "Invalid JSON" in result[0]
+    with pytest.raises(PipelineError, match="Invalid JSON"):
+        node.run(path, "", seed=42, jinja_vars="{bad json}")
 
 
 def test_node_jinja_error(node, write_yaml):
     path = write_yaml("{{ undefined_var }}\nmeta:\n  - detailed\n")
 
-    result = node.run(path, "", seed=42, jinja_vars="{}")
-
-    assert "Jinja2 error" in result[0]
+    with pytest.raises(PipelineError, match="Jinja2 error"):
+        node.run(path, "", seed=42, jinja_vars="{}")
 
 
 def test_node_include_from_same_dir(node, tmp_path):
