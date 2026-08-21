@@ -25,6 +25,7 @@ class PipelineResult:
     lora_stack: list[tuple[str, float, float]]
     lora_stack_lbw: list[LoraEntry]
     blocks: list[list[str]]
+    sections: dict[str, str]
 
 
 def merge_documents(docs: Sequence[dict[str, Any] | None]) -> dict[str, Any]:
@@ -90,18 +91,24 @@ def process_file(
 
     try:
         parser = YAMLPromptTemplateParser(seed=seed, wildcard_dir=wildcard_dir)
-        blocks = parser.parse_document(yaml_data)
+        named_sections = parser.parse_named_sections(yaml_data)
     except Exception as error:
         raise PipelineError(f"Parser error: {error}") from error
 
+    blocks = [lines for _, lines in named_sections]
     prompt_lines = [line for block in blocks for line in block]
     prompt_text = "\n\n".join(prompt_lines)
     lora_stack = extract_lora_tags(prompt_text)
     lora_stack_lbw = extract_lora_tags_lbw(prompt_text)
-    final_prompt = prompt_text if keep_lora_tags else strip_lora_tags(prompt_text)
+
+    def _finalize(text: str) -> str:
+        return text if keep_lora_tags else strip_lora_tags(text)
+
+    sections = {name: _finalize("\n\n".join(lines)) for name, lines in named_sections}
     return PipelineResult(
-        prompt=final_prompt,
+        prompt=_finalize(prompt_text),
         lora_stack=lora_stack,
         lora_stack_lbw=lora_stack_lbw,
         blocks=blocks,
+        sections=sections,
     )

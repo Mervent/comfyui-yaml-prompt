@@ -227,12 +227,8 @@ def test_choice_items_joined_by_separator(parser):
 
 def test_sections_with_choices_still_separate_blocks(parser):
     doc = {
-        "s1": {
-            "values": [{"choice": {"values": ["a", "b"]}}]
-        },
-        "s2": {
-            "values": [{"choice": {"values": ["c", "d"]}}]
-        },
+        "s1": {"values": [{"choice": {"values": ["a", "b"]}}]},
+        "s2": {"values": [{"choice": {"values": ["c", "d"]}}]},
     }
 
     blocks = parser.parse_document(doc)
@@ -303,3 +299,27 @@ def test_document_no_separator_defaults_to_comma(parser):
     blocks = parser.parse_document(doc)
 
     assert blocks == [["a, b"]]
+
+
+def test_parse_named_sections_preserves_names_in_order(parser):
+    doc = {"alpha": ["a", "b"], "beta": ["c"]}
+
+    sections = parser.parse_named_sections(doc)
+
+    assert sections == [("alpha", ["a, b"]), ("beta", ["c"])]
+
+
+def test_parse_named_sections_skips_vars_and_separator(parser):
+    doc = {"separator": " | ", "vars": {"x": "1"}, "tags": {"values": ["a", "b"]}}
+
+    sections = parser.parse_named_sections(doc)
+
+    assert sections == [("tags", ["a | b"])]
+
+
+def test_parse_named_sections_skips_empty_sections(parser):
+    doc = {"kept": ["a"], "dropped": {"chance": 0, "values": ["b"]}}
+
+    sections = parser.parse_named_sections(doc)
+
+    assert sections == [("kept", ["a"])]

@@ -53,6 +53,26 @@ class YAMLPromptTemplateParser:
         list[list[str]]
             Each inner list is one section's flattened prompt lines.
         """
+        return [lines for _, lines in self.parse_named_sections(doc)]
+
+    def parse_named_sections(self, doc: dict[str, Any]) -> list[tuple[str, list[str]]]:
+        """Flatten *doc* into ``(section_name, prompt_lines)`` pairs.
+
+        Same flattening as :meth:`parse_document`, but the top-level section
+        name is preserved alongside each block so callers can route individual
+        sections to named outputs.
+
+        Parameters
+        ----------
+        doc : dict[str, Any]
+            YAML mapping as returned by ``yaml.safe_load``.
+
+        Returns
+        -------
+        list[tuple[str, list[str]]]
+            One pair per non-empty top-level section, in document order. The
+            reserved ``vars`` and ``separator`` keys are excluded.
+        """
         if not isinstance(doc, dict):
             raise TypeError(
                 f"Expected a YAML mapping (dict) at top level, got {type(doc).__name__}. "
@@ -64,15 +84,15 @@ class YAMLPromptTemplateParser:
 
         global_vars = self._collect_vars(doc.get("vars", {}), {})
 
-        blocks: list[list[str]] = []
+        sections: list[tuple[str, list[str]]] = []
         for name, section in doc.items():
             if name in ("vars", "separator"):
                 continue
             lines = self._parse_section(section, global_vars, inherited_sep)
             if lines:
-                blocks.append(lines)
+                sections.append((str(name), lines))
 
-        return blocks
+        return sections
 
     def expand_string(self, text: str, variables: dict[str, str]) -> str:
         """Expand ``$vars``, brace lists, and wildcards until stable."""
