@@ -1,7 +1,11 @@
 import pytest
 
 from yaml_prompt.node import YAMLPromptLoader
-from yaml_prompt.node_minimax_h3 import REF2VA_FIELDS, YAMLPromptLoaderMiniMaxH3
+from yaml_prompt.node_minimax_h3 import (
+    REF2VA_FIELDS,
+    SCENE_FIELDS,
+    YAMLPromptLoaderMiniMaxH3,
+)
 
 
 @pytest.fixture
@@ -23,7 +27,11 @@ def _field(result, name):
     return result[3 + REF2VA_FIELDS.index(name)]
 
 
-def test_return_names_expose_ref2va_fields():
+def _scene_field(result, name):
+    return result[3 + len(REF2VA_FIELDS) + SCENE_FIELDS.index(name)]
+
+
+def test_return_names_expose_ref2va_and_scene_fields():
     assert YAMLPromptLoaderMiniMaxH3.RETURN_NAMES == [
         "prompt",
         "lora_stack",
@@ -34,6 +42,10 @@ def test_return_names_expose_ref2va_fields():
         "detailed_description",
         "overall_soundscape",
         "non_diegetic_music",
+        "scene1",
+        "scene2",
+        "scene3",
+        "scene4",
     ]
 
 
@@ -42,6 +54,10 @@ def test_return_types_are_string_plus_lora_stacks():
         "STRING",
         "LORA_STACK",
         "LORA_STACK_LBW",
+        "STRING",
+        "STRING",
+        "STRING",
+        "STRING",
         "STRING",
         "STRING",
         "STRING",
@@ -111,3 +127,42 @@ def test_keep_lora_tags_preserves_tag_in_ref2va_output(h3_node, write_yaml):
     result = h3_node.run(path, "", seed=42, jinja_vars="{}", keep_lora_tags=True)
 
     assert "<lora:detail_v2:0.8>" in _field(result, "subject_definitions")
+
+
+def test_scene_sections_routed_to_named_outputs(h3_node, write_yaml):
+    path = write_yaml(
+        "scene1:\n  - castle gate\nscene3:\n  - throne room\n  - torchlight\n"
+    )
+
+    result = h3_node.run(path, "", seed=42, jinja_vars="{}")
+
+    assert _scene_field(result, "scene1") == "castle gate"
+    assert _scene_field(result, "scene3") == "throne room, torchlight"
+
+
+def test_scene_sections_excluded_from_prompt(h3_node, write_yaml):
+    path = write_yaml("scene1:\n  - castle gate\nscene:\n  - courtyard\n")
+
+    result = h3_node.run(path, "", seed=42, jinja_vars="{}")
+
+    assert result[0] == "courtyard"
+    assert "castle gate" not in result[0]
+
+
+def test_missing_scene_fields_default_to_empty(h3_node, write_yaml):
+    path = write_yaml("scene1:\n  - only one\n")
+
+    result = h3_node.run(path, "", seed=42, jinja_vars="{}")
+
+    assert _scene_field(result, "scene2") == ""
+    assert _scene_field(result, "scene4") == ""
+
+
+def test_lora_stripped_from_scene_output(h3_node, write_yaml):
+    path = write_yaml("scene1:\n  - gate <lora:detail_v2:0.8>\n")
+
+    result = h3_node.run(path, "", seed=42, jinja_vars="{}")
+
+    assert "detail_v2" not in _scene_field(result, "scene1")
+    assert "gate" in _scene_field(result, "scene1")
+    assert result[1] == [("detail_v2.safetensors", 0.8, 0.8)]

@@ -16,16 +16,26 @@ REF2VA_FIELDS: Final[tuple[str, ...]] = (
     "non_diegetic_music",
 )
 
+SCENE_FIELDS: Final[tuple[str, ...]] = (
+    "scene1",
+    "scene2",
+    "scene3",
+    "scene4",
+)
+
+RESERVED_FIELDS: Final[tuple[str, ...]] = (*REF2VA_FIELDS, *SCENE_FIELDS)
+
 _FIELD_DEFAULTS: Final[dict[str, str]] = {"non_diegetic_music": "N/A"}
 
 
 class YAMLPromptLoaderMiniMaxH3:
-    """Load a YAML prompt file and route REF2VA sections to named outputs.
+    """Load a YAML prompt file and route REF2VA and scene sections to outputs.
 
-    Top-level YAML keys whose names match :data:`REF2VA_FIELDS` are emitted as
-    dedicated ``STRING`` outputs (for the MiniMax H3 Director REF2VA text
-    inputs). Every remaining section is joined into the combined ``prompt``
-    output, keeping the same lora-stack behaviour as :class:`YAMLPromptLoader`.
+    Top-level YAML keys whose names match :data:`REF2VA_FIELDS` or
+    :data:`SCENE_FIELDS` are emitted as dedicated ``STRING`` outputs (for the
+    MiniMax H3 Director REF2VA text inputs and per-scene fields). Every
+    remaining section is joined into the combined ``prompt`` output, keeping the
+    same lora-stack behaviour as :class:`YAMLPromptLoader`.
     """
 
     CATEGORY: Final[str] = "Prompt"
@@ -33,18 +43,15 @@ class YAMLPromptLoaderMiniMaxH3:
         "STRING",
         "LORA_STACK",
         "LORA_STACK_LBW",
-        "STRING",
-        "STRING",
-        "STRING",
-        "STRING",
-        "STRING",
-        "STRING",
+        *["STRING"] * len(REF2VA_FIELDS),
+        *["STRING"] * len(SCENE_FIELDS),
     ]
     RETURN_NAMES: Final[list[str]] = [
         "prompt",
         "lora_stack",
         "lora_stack_lbw",
         *REF2VA_FIELDS,
+        *SCENE_FIELDS,
     ]
     FUNCTION: Final[str] = "run"
 
@@ -65,14 +72,23 @@ class YAMLPromptLoaderMiniMaxH3:
         )
 
         prompt = "\n\n".join(
-            text for name, text in result.sections.items() if name not in REF2VA_FIELDS
+            text
+            for name, text in result.sections.items()
+            if name not in RESERVED_FIELDS
         )
         ref_values = tuple(
             result.sections.get(name, _FIELD_DEFAULTS.get(name, ""))
             for name in REF2VA_FIELDS
         )
+        scene_values = tuple(result.sections.get(name, "") for name in SCENE_FIELDS)
 
-        return (prompt, result.lora_stack, result.lora_stack_lbw, *ref_values)
+        return (
+            prompt,
+            result.lora_stack,
+            result.lora_stack_lbw,
+            *ref_values,
+            *scene_values,
+        )
 
     @classmethod
     def IS_CHANGED(cls, *_: Any, **__: Any) -> float:
