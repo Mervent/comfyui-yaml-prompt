@@ -23,8 +23,6 @@ SCENE_FIELDS: Final[tuple[str, ...]] = (
     "scene4",
 )
 
-RESERVED_FIELDS: Final[tuple[str, ...]] = (*REF2VA_FIELDS, *SCENE_FIELDS)
-
 _FIELD_DEFAULTS: Final[dict[str, str]] = {"non_diegetic_music": "N/A"}
 
 
@@ -33,9 +31,12 @@ class YAMLPromptLoaderMiniMaxH3:
 
     Top-level YAML keys whose names match :data:`REF2VA_FIELDS` or
     :data:`SCENE_FIELDS` are emitted as dedicated ``STRING`` outputs (for the
-    MiniMax H3 Director REF2VA text inputs and per-scene fields). Every
-    remaining section is joined into the combined ``prompt`` output, keeping the
-    same lora-stack behaviour as :class:`YAMLPromptLoader`.
+    MiniMax H3 Director REF2VA text inputs and per-scene fields). The combined
+    ``prompt`` output assembles the six REF2VA sections into a MiniMax H3
+    ref2va text block, in canonical order, rendering each as a ``name:`` header
+    followed by its content on the next line and separated by a blank line; any
+    empty section is rendered with ``N/A`` as its content. Lora-stack behaviour
+    matches :class:`YAMLPromptLoader`.
     """
 
     CATEGORY: Final[str] = "Prompt"
@@ -71,16 +72,16 @@ class YAMLPromptLoaderMiniMaxH3:
             keep_lora_tags=keep_lora_tags,
         )
 
-        prompt = "\n\n".join(
-            text
-            for name, text in result.sections.items()
-            if name not in RESERVED_FIELDS
-        )
         ref_values = tuple(
             result.sections.get(name, _FIELD_DEFAULTS.get(name, ""))
             for name in REF2VA_FIELDS
         )
         scene_values = tuple(result.sections.get(name, "") for name in SCENE_FIELDS)
+
+        prompt = "\n\n".join(
+            f"{name}:\n{value or 'N/A'}"
+            for name, value in zip(REF2VA_FIELDS, ref_values)
+        )
 
         return (
             prompt,

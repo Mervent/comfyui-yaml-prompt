@@ -83,15 +83,47 @@ def test_ref2va_sections_routed_to_named_outputs(h3_node, write_yaml):
     assert _field(result, "overall_soundscape") == "distant thunder"
 
 
-def test_non_reserved_sections_go_to_prompt(h3_node, write_yaml):
+def test_prompt_assembles_ref2va_sections(h3_node, write_yaml):
+    path = write_yaml(
+        "subject_definitions:\n  - a hero\noverall_soundscape:\n  - distant thunder\n"
+    )
+
+    result = h3_node.run(path, "", seed=42, jinja_vars="{}")
+
+    assert result[0] == (
+        "subject_definitions:\na hero\n\n"
+        "summary:\nN/A\n\n"
+        "retention_analysis:\nN/A\n\n"
+        "detailed_description:\nN/A\n\n"
+        "overall_soundscape:\ndistant thunder\n\n"
+        "non_diegetic_music:\nN/A"
+    )
+
+
+def test_empty_ref2va_sections_render_as_na_in_prompt(h3_node, write_yaml):
+    path = write_yaml("scene:\n  - hi\n")
+
+    result = h3_node.run(path, "", seed=42, jinja_vars="{}")
+
+    assert result[0] == (
+        "subject_definitions:\nN/A\n\n"
+        "summary:\nN/A\n\n"
+        "retention_analysis:\nN/A\n\n"
+        "detailed_description:\nN/A\n\n"
+        "overall_soundscape:\nN/A\n\n"
+        "non_diegetic_music:\nN/A"
+    )
+
+
+def test_non_ref2va_sections_excluded_from_prompt(h3_node, write_yaml):
     path = write_yaml(
         "subject_definitions:\n  - a hero\nscene:\n  - castle courtyard\n"
     )
 
     result = h3_node.run(path, "", seed=42, jinja_vars="{}")
 
-    assert result[0] == "castle courtyard"
-    assert "a hero" not in result[0]
+    assert "castle courtyard" not in result[0]
+    assert "subject_definitions:\na hero" in result[0]
 
 
 def test_missing_music_defaults_to_na(h3_node, write_yaml):
@@ -141,12 +173,14 @@ def test_scene_sections_routed_to_named_outputs(h3_node, write_yaml):
 
 
 def test_scene_sections_excluded_from_prompt(h3_node, write_yaml):
-    path = write_yaml("scene1:\n  - castle gate\nscene:\n  - courtyard\n")
+    path = write_yaml(
+        "scene1:\n  - castle gate\nsubject_definitions:\n  - a hero\n"
+    )
 
     result = h3_node.run(path, "", seed=42, jinja_vars="{}")
 
-    assert result[0] == "courtyard"
     assert "castle gate" not in result[0]
+    assert _scene_field(result, "scene1") == "castle gate"
 
 
 def test_missing_scene_fields_default_to_empty(h3_node, write_yaml):
