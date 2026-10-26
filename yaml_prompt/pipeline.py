@@ -90,7 +90,9 @@ def process_file(
         raise PipelineError(f"YAML error: {error}")
 
     try:
-        parser = YAMLPromptTemplateParser(seed=seed, wildcard_dir=wildcard_dir)
+        parser = YAMLPromptTemplateParser(
+            seed=seed, wildcard_dir=wildcard_dir, base_dir=file_path.parent
+        )
         named_sections = parser.parse_named_sections(yaml_data)
     except Exception as error:
         raise PipelineError(f"Parser error: {error}") from error

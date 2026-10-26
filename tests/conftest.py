@@ -21,10 +21,11 @@ SEED = 42
 
 @pytest.fixture
 def make_parser():
-    def _factory(seed=None, wildcard_dir=None):
+    def _factory(seed=None, wildcard_dir=None, base_dir=None):
         return YAMLPromptTemplateParser(
             seed=seed,
             wildcard_dir=wildcard_dir or WILDCARDS_DIR,
+            base_dir=base_dir,
         )
 
     return _factory

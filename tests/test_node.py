@@ -110,7 +110,7 @@ def test_node_lora_excluded_by_jinja_condition(node, write_yaml):
         "s:\n  - base {% if mode == 'anime' %}<lora:anime:0.8>{% endif %}\n"
     )
 
-    result = node.run(path, "", seed=42, jinja_vars="{}")
+    result = node.run(path, "", seed=42, jinja_vars='{"mode": "realistic"}')
 
     assert result[1] == []
 

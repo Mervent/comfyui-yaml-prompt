@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import glob
+import logging
+import os
 import random
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Final, Sequence
 
 from .chance import ChanceEvaluator
 from .selection import stable_select
 
 __all__ = ["ChoiceResolver"]
+
+logger = logging.getLogger(__name__)
 
 
 class ChoiceResolver:
@@ -21,11 +27,15 @@ class ChoiceResolver:
         Evaluator for per-item and per-block chance gates.
     expand_fn:
         Callback for string expansion (``$vars``, braces, wildcards).
+    base_dir:
+        Directory that relative ``files`` patterns resolve against; defaults to
+        the current working directory.
     """
 
     VALUES_KEYS: Final[Sequence[str]] = ("values", "options", "choices")
     CHOICE_KEYS: Final[Sequence[str]] = ("choice", "oneOf")
     CHAIN_KEY: Final[str] = "chain"
+    FILES_KEY: Final[str] = "files"
     GROUP_KEY: Final[str] = "group"
     MAX_CHOICE_DEPTH: Final[int] = 16
 
@@ -36,11 +46,13 @@ class ChoiceResolver:
         expand_fn: Callable[[str, dict[str, str]], str],
         *,
         rng: random.Random | None = None,
+        base_dir: Path | None = None,
     ) -> None:
         self.seed = seed
         self._chance = chance
         self._expand = expand_fn
         self._rng = rng or random.Random()
+        self._base_dir = base_dir or Path.cwd()
 
     def resolve(
         self,
@@ -49,14 +61,35 @@ class ChoiceResolver:
         _depth: int = 0,
         inherited_sep: str | None = None,
     ) -> str | None:
-        """Pick one option from a choice/oneOf block, applying weights and chance."""
+        """Pick one option from a choice/oneOf block, applying weights and chance.
+
+        The options come either from a ``values``/``options``/``choices`` list or,
+        with ``files: <glob>``, from the matching files: one file is picked and
+        its whole content becomes the chosen text.
+        """
         if not self._chance.check(block):
             return None
 
         template = block.get("template", "$value")
         options = self.get_list_values(block)
+        files = block.get(self.FILES_KEY)
+        if options is not None and files is not None:
+            raise ValueError(
+                "choice/oneOf takes either a values list or 'files', not both."
+            )
+        if files is not None:
+            if not isinstance(files, str):
+                raise TypeError(
+                    f"choice/oneOf 'files' must be a glob string, got {files!r}."
+                )
+            content = self._pick_file(files, block)
+            if content is None:
+                return None
+            return self._expand(template.replace("$value", content), variables)
         if options is None:
-            raise ValueError("choice/oneOf requires 'values', 'options', or 'choices'.")
+            raise ValueError(
+                "choice/oneOf requires 'values', 'options', 'choices', or 'files'."
+            )
 
         explicit_sep = block.get("separator")
         child_sep = str(explicit_sep) if explicit_sep is not None else inherited_sep
@@ -304,6 +337,34 @@ class ChoiceResolver:
             return opt.get("name", ""), self._safe_weight(opt.get("weight", 1)), False
 
         return str(opt), 1.0, False
+
+    def _pick_file(self, pattern: str, block: dict[str, Any]) -> str | None:
+        """Read one file matching *pattern*, picked like any other option.
+
+        Files matched by a relative pattern are identified by their POSIX path
+        relative to ``base_dir``, so a seed picks the same file wherever the
+        template directory lives.
+        """
+        expanded = os.path.expanduser(pattern)
+        is_relative = not os.path.isabs(expanded)
+        if is_relative:
+            expanded = os.path.join(glob.escape(str(self._base_dir)), expanded)
+        candidates: dict[str, str] = {}
+        for path in glob.glob(expanded, recursive=True):
+            if not os.path.isfile(path):
+                continue
+            name = os.path.relpath(path, self._base_dir) if is_relative else path
+            candidates[Path(name).as_posix()] = path
+        if not candidates:
+            logger.warning("No files match '%s' (resolved to %s)", pattern, expanded)
+            return None
+
+        names = sorted(candidates)
+        if block.get("stable", True):
+            chosen = stable_select(self.seed, names, key=block.get("key"))
+        else:
+            chosen = self._rng.choice(names)
+        return Path(candidates[chosen]).read_text(encoding="utf-8").strip()
 
     def _random_select(self, items: list[str], weights: list[float]) -> str:
         if all(w == weights[0] for w in weights):

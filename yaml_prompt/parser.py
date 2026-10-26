@@ -20,7 +20,12 @@ class YAMLPromptTemplateParser:
         r"^rand\(\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)\s*\)$"
     )
 
-    def __init__(self, seed: int | None = None, wildcard_dir: Path | str | None = None):
+    def __init__(
+        self,
+        seed: int | None = None,
+        wildcard_dir: Path | str | None = None,
+        base_dir: Path | str | None = None,
+    ):
         if seed is None:
             seed = random.randint(0, 2**63 - 1)
 
@@ -36,8 +41,13 @@ class YAMLPromptTemplateParser:
         unstable_rng = random.Random()
         self._chance = ChanceEvaluator(seed, rng=unstable_rng)
         self._expander = StringExpander(seed, wdir)
+        base = Path(base_dir).expanduser().resolve() if base_dir else None
         self._choices = ChoiceResolver(
-            seed, self._chance, self._expander.expand, rng=unstable_rng
+            seed,
+            self._chance,
+            self._expander.expand,
+            rng=unstable_rng,
+            base_dir=base,
         )
 
     def parse_document(self, doc: dict[str, Any]) -> list[list[str]]:

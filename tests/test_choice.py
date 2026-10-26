@@ -1,5 +1,13 @@
 import pytest
 
+from yaml_prompt.pipeline import process_file
+
+
+def _write_files(directory, contents):
+    directory.mkdir(parents=True, exist_ok=True)
+    for name, text in contents.items():
+        (directory / name).write_text(text, encoding="utf-8")
+
 
 def test_choice_basic(parser):
     result = parser._resolve_item({"choice": {"values": ["a", "b"]}}, {})
@@ -63,7 +71,7 @@ def test_choice_option_with_chance_zero(parser):
 
 
 def test_choice_missing_values_key(parser):
-    with pytest.raises(ValueError, match="requires 'values', 'options', or 'choices'"):
+    with pytest.raises(ValueError, match="choice/oneOf requires 'values'"):
         parser._resolve_item({"choice": {}}, {})
 
 
@@ -282,3 +290,84 @@ def test_nested_choice_in_section(parser):
     joined = " ".join(result)
     assert "intro" in joined
     assert any(v in joined for v in ("inner_a", "inner_b", "flat_option"))
+
+
+def test_choice_files_reads_file_relative_to_base_dir(make_parser, tmp_path):
+    _write_files(tmp_path / "poses", {"sitting.txt": "  sitting on a chair\n"})
+    parser = make_parser(seed=42, base_dir=tmp_path)
+
+    result = parser._resolve_item(
+        {"choice": {"files": "poses/*.txt", "template": "pose: $value"}}, {}
+    )
+
+    assert result == "pose: sitting on a chair"
+
+
+def test_choice_files_picks_one_of_matching_files(make_parser, tmp_path):
+    _write_files(tmp_path, {"a.txt": "alpha", "b.txt": "beta", "c.md": "gamma"})
+
+    results = {
+        make_parser(seed=seed, base_dir=tmp_path)._resolve_item(
+            {"choice": {"files": "*.txt"}}, {}
+        )
+        for seed in range(50)
+    }
+
+    assert results == {"alpha", "beta"}
+
+
+def test_choice_files_same_seed_same_file_in_any_location(make_parser, tmp_path):
+    """Selection depends on paths relative to base_dir, not absolute ones."""
+    contents = {f"{name}.txt": name for name in ("one", "two", "three", "four")}
+    _write_files(tmp_path / "home_a" / "parts", contents)
+    _write_files(tmp_path / "elsewhere" / "home_b" / "parts", contents)
+    item = {"choice": {"files": "parts/*.txt"}}
+
+    picks_a = [
+        make_parser(seed=seed, base_dir=tmp_path / "home_a")._resolve_item(item, {})
+        for seed in range(30)
+    ]
+    picks_b = [
+        make_parser(
+            seed=seed, base_dir=tmp_path / "elsewhere" / "home_b"
+        )._resolve_item(item, {})
+        for seed in range(30)
+    ]
+
+    assert picks_a == picks_b
+
+
+def test_choice_files_no_match_returns_none(make_parser, tmp_path):
+    parser = make_parser(seed=42, base_dir=tmp_path)
+
+    result = parser._resolve_item({"choice": {"files": "missing/*.txt"}}, {})
+
+    assert result is None
+
+
+def test_choice_files_with_values_raises(make_parser, tmp_path):
+    parser = make_parser(seed=42, base_dir=tmp_path)
+
+    with pytest.raises(ValueError, match="not both"):
+        parser._resolve_item({"choice": {"files": "*.txt", "values": ["a"]}}, {})
+
+
+def test_choice_files_non_string_raises(make_parser, tmp_path):
+    parser = make_parser(seed=42, base_dir=tmp_path)
+
+    with pytest.raises(TypeError, match="must be a glob string"):
+        parser._resolve_item({"choice": {"files": ["a/*.txt", "b/*.txt"]}}, {})
+
+
+def test_process_file_resolves_files_next_to_yaml(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    _write_files(project / "poses", {"standing.txt": "standing tall"})
+    (project / "template.yaml").write_text(
+        "pose:\n  values:\n    - choice:\n        files: poses/*.txt\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = process_file(project / "template.yaml", seed=42)
+
+    assert result.prompt == "standing tall"
